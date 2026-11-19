@@ -59,7 +59,6 @@
   const state = {
     q: '',
     action: '',
-    ipLocation: '',
     from: addDays(todayStr(), -6),
     to: todayStr(),
     page: 1,
@@ -79,6 +78,35 @@
     return `<span class="action-tag ${cls}" title="${escapeHtml(action)}">${escapeHtml(actionLabel(action))}</span>`;
   }
 
+  /**
+   * 操作人单元：按「谁在操作」分两种展示。
+   * - 门店操作（店员账号 / 免登录链接）：门店编码 + 门店名称，店员账号名放在下面一行，
+   *   一眼看出是哪家店做的，需要追人时也还有线索。
+   * - 账号操作（总部 / 区域管理员）：账号 + 姓名，同名或改名时都能对上号。
+   * 老数据没有 actor_username 与门店列（v5/v6 之前写入的），退化为只显示姓名并标注角色。
+   */
+  function actorCell(row) {
+    const name = row.actor_name || '';
+    const username = row.actor_username || '';
+    const storeCode = row.actor_store_code || '';
+    const storeName = row.actor_store_name || '';
+    const role = window.Admin.ROLE[row.actor_role] || row.actor_role || '';
+
+    if (storeCode || storeName) {
+      const staff = username || name;
+      return `<span class="ac-store">${escapeHtml(storeCode || '—')}</span>
+        <span class="ac-name">${escapeHtml(storeName || name || '—')}</span>
+        <span class="tiny muted">${escapeHtml(role)}${staff ? ` · ${escapeHtml(staff)}` : ''}</span>`;
+    }
+    if (!username) {
+      return `<span class="ac-name">${escapeHtml(name || '—')}</span>
+        <span class="tiny muted">${escapeHtml(role)}</span>`;
+    }
+    return `<span class="ac-account">${escapeHtml(username)}</span>
+      <span class="ac-name">${escapeHtml(name || username)}</span>
+      <span class="tiny muted">${escapeHtml(role)}</span>`;
+  }
+
   function sourceCell(row) {
     if (state.mode === 'location') {
       const loc = row.ip_location || '—';
@@ -89,6 +117,27 @@
       <span class="fp" title="${escapeHtml(row.device_id || '')}">指纹 ${
       escapeHtml(String(row.device_id || '').slice(0, 16)) || '—'
     }</span></td>`;
+  }
+
+  /**
+   * 详情单元：按换行拆成多行渲染。
+   * 超过 2 行（或单行过长）时默认折叠，点「展开全部」查看完整变更明细，
+   * 这样表格不会被一条长日志撑开，细节又不会丢。
+   */
+  function detailCell(row) {
+    const text = String(row.detail || '').trim();
+    if (!text) return `<td class="log-detail"><span class="muted">—</span></td>`;
+    const lines = text.split('\n');
+    const foldable = lines.length > 2 || text.length > 110;
+    const body = lines.map((line) => `<span class="dl-line">${escapeHtml(line) || '&nbsp;'}</span>`).join('');
+    const toggle = foldable
+      ? `<button class="dl-toggle" type="button" data-detail-toggle data-lines="${lines.length}"
+           aria-expanded="false" aria-label="展开完整日志详情">展开全部（${lines.length} 行）</button>`
+      : '';
+    return `<td class="log-detail${foldable ? ' foldable' : ''}">
+      <div class="dl-body${foldable ? '' : ' open'}" data-detail-body>${body}</div>
+      ${toggle}
+    </td>`;
   }
 
   function renderTable() {
@@ -104,10 +153,9 @@
           .map(
             (r) => `<tr>
               <td class="tiny mono">${escapeHtml((r.created_at || '').slice(5, 19))}</td>
-              <td class="small">${escapeHtml(r.actor_name || '—')}<br>
-                <span class="tiny muted">${escapeHtml(window.Admin.ROLE[r.actor_role] || r.actor_role || '')}</span></td>
+              <td class="actor-cell">${actorCell(r)}</td>
               <td>${actionTag(r.action)}</td>
-              <td class="log-detail">${escapeHtml(r.detail || '')}</td>
+              ${detailCell(r)}
               ${sourceCell(r)}
             </tr>`,
           )
@@ -136,9 +184,8 @@
     return `<div class="toolbar">
       <label class="search-box">
         <span class="search-ico" aria-hidden="true">${h.icon('search')}</span>
-        <input class="input search" id="lg-q" type="search" placeholder="搜索操作人 / 详情 / IP / 归属地" value="${escapeHtml(
-          state.q,
-        )}" autocomplete="off">
+        <input class="input search" id="lg-q" type="search"
+          placeholder="搜索操作人账号 / 姓名 / 详情 / IP / 设备指纹" value="${escapeHtml(state.q)}" autocomplete="off">
       </label>
       <select class="select" id="lg-action" aria-label="按动作筛选">
         <option value="">全部动作</option>
@@ -151,9 +198,6 @@
           )
           .join('')}
       </select>
-      <input class="input" id="lg-location" type="search" placeholder="归属地筛选，如 广东" value="${escapeHtml(
-        state.ipLocation,
-      )}">
       <input class="input" type="date" id="lg-from" value="${state.from}" max="${todayStr()}">
       <span class="muted small">至</span>
       <input class="input" type="date" id="lg-to" value="${state.to}" max="${todayStr()}">
@@ -220,7 +264,6 @@
     });
     if (state.q) q.set('q', state.q);
     if (state.action) q.set('action', state.action);
-    if (state.ipLocation) q.set('ipLocation', state.ipLocation);
     return q;
   }
 
@@ -261,12 +304,6 @@
       state.page = 1;
       await refresh();
     });
-    const loc = $('#lg-location');
-    loc.addEventListener('change', async () => {
-      state.ipLocation = loc.value.trim();
-      state.page = 1;
-      await refresh();
-    });
     $('#lg-from').addEventListener('change', async (e) => {
       state.from = e.target.value || state.from;
       if (state.from > state.to) state.to = state.from;
@@ -282,6 +319,19 @@
 
     const refreshBtn = $('#lg-refresh');
     if (refreshBtn) refreshBtn.addEventListener('click', refresh);
+
+    // 详情展开/收起：就地切换，不重渲染，避免翻页状态与滚动位置丢失
+    $$('[data-detail-toggle]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const cell = btn.closest('.log-detail');
+        const body = cell && cell.querySelector('[data-detail-body]');
+        if (!body) return;
+        const open = body.classList.toggle('open');
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.textContent = open ? '收起' : `展开全部（${btn.dataset.lines} 行）`;
+        btn.setAttribute('aria-label', open ? '收起日志详情' : '展开完整日志详情');
+      });
+    });
 
     $$('[data-toggle-mode]').forEach((th) => {
       th.addEventListener('click', async () => {
@@ -316,7 +366,8 @@
       updateBtn.addEventListener('click', async () => {
         const ok = await window.SSD.confirmDialog({
           title: '更新 IP 库',
-          message: '将从 GitHub 下载最新版 ip2region xdb（约 11 MB）并热替换，期间归属地解析会短暂使用旧库。继续吗？',
+          message:
+            '将从 GitHub 及其 CDN 镜像下载最新版 ip2region xdb（约 11 MB）并热替换，期间归属地解析会短暂使用旧库。网络较慢时可能需等待 1–3 分钟，请勿关闭页面。继续吗？',
           okText: '开始更新',
         });
         if (!ok) return;
@@ -324,7 +375,9 @@
         updateBtn.textContent = '下载中…';
         try {
           const result = await api.post('/api/logs/ipdb/update', {});
-          toast(`IP 库已更新（${(result.status.meta && result.status.meta.revision || '').slice(0, 10)}）`, 'ok');
+          const via = result.via && result.via.label ? `，下载源 ${result.via.label}` : '';
+          const rev = ((result.status.meta && result.status.meta.revision) || '').slice(0, 10);
+          toast(`IP 库已更新${rev ? `（版本 ${rev}）` : ''}${via}`, 'ok');
           await loadIpdb();
           await paint();
         } catch (err) {

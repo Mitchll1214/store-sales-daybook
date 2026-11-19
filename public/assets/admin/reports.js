@@ -125,21 +125,20 @@
         (it) => `<tr>
           <td>${escapeHtml(it.alias)}<br><span class="tiny muted">${escapeHtml(it.productName)}</span></td>
           <td class="num">${it.qty}</td>
-          <td class="num">${it.amount.toFixed(2)}</td>
         </tr>`,
       )
       .join('');
     return `<div style="margin-top:8px">
       <div class="small" style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline">
         <b>${periodKey === 'am' ? '上午' : '下午'}</b>
-        <span class="muted">${period.itemCount} 项 · 数量 ${period.totalQty} · 金额 ${period.totalAmount.toFixed(2)}</span>
+        <span class="muted">${period.itemCount} 项 · 数量 ${period.totalQty}</span>
         <span class="muted tiny">提交 ${escapeHtml((period.submittedAt || '').slice(5, 16))}${
       period.submitter ? ` · ${escapeHtml(period.submitter)}` : ''
     }</span>
       </div>
       <table class="entry-table" style="margin-top:4px">
-        <thead><tr><th>商品（别名 / 品名）</th><th class="num">数量</th><th class="num">金额</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="3" class="muted">无明细</td></tr>'}</tbody>
+        <thead><tr><th>商品（别名 / 品名）</th><th class="num">数量</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="2" class="muted">无明细</td></tr>'}</tbody>
       </table>
     </div>`;
   }
@@ -150,7 +149,7 @@
         <b class="mono">${escapeHtml(store.storeCode)}</b>
         <span>${escapeHtml(store.storeName)}</span>
         <span class="grow" style="flex:1"></span>
-        <span class="muted small">合计 ${store.totalQty} 件 / ${store.totalAmount.toFixed(2)} 元</span>
+        <span class="muted small">合计 ${store.totalQty} 件</span>
       </div>
       <div class="store-block-body">
         ${renderPeriodBlock('am', store.periods.am)}
@@ -172,7 +171,7 @@
               <button class="fold-head" type="button" data-toggle="${day.date}">
                 <span class="chev">▶</span>
                 <span class="fh-date">${h.fmtDay(day.date)}</span>
-                <span class="fh-meta">${day.stores.length} 家门店提交 · ${day.done}/${day.expected} 次 · ${day.totalQty} 件 / ${day.totalAmount.toFixed(2)} 元</span>
+                <span class="fh-meta">${day.stores.length} 家门店提交 · ${day.done}/${day.expected} 次 · ${day.totalQty} 件</span>
                 <span style="flex:1"></span>
                 <span class="pill ${day.rate >= 100 ? 'pill-ok' : day.rate > 0 ? 'pill-warn' : 'pill-danger'}">${day.rate.toFixed(
                   1,

@@ -868,30 +868,41 @@ table.data.user-table tbody tr:hover {
   display: flex;
   align-items: flex-end;
   gap: 0;
+  width: 100%;
   min-height: 112px;
-  padding-top: 18px;
+  /* 给柱顶外侧的数量标签留出空间，避免被裁切 */
+  padding-top: 22px;
 }
 
-/* 一个品类一个区块，区块之间用虚线分隔，末尾显示品类名 */
+/* 一个品类一个区块。宽度按「品类数」等分整行，而不是按商品数分配：
+   否则商品多的品类挤成一片、商品少的品类只剩一根孤柱，两端还会留白。
+   等分后每个品类占据相同视觉重量，跨品类比较时节奏一致。 */
 .bar-cat {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  flex: 0 0 auto;
-  padding: 0 10px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 clamp(4px, 0.7vw, 10px);
   position: relative;
 }
 
+/* 品类分隔线：等分后每段宽度接近，靠一条更深的实线才看得出「这是两个品类」 */
 .bar-cat + .bar-cat {
-  border-left: 1px dashed var(--line-soft, #e6ecf1);
+  border-left: 2px solid #b8c9d6;
 }
 
+/* 品类内的柱子均分本区块宽度。间距收得很紧：商品多的品类（如 8 个）
+   每一份宽度本来就小，间距再留大一点，柱子就会被挤成细线。 */
 .bar-cat-bars {
   display: flex;
   align-items: flex-end;
-  gap: 7px;
+  justify-content: center;
+  gap: clamp(1px, 0.22vw, 6px);
+  width: 100%;
   height: 96px;
+  min-width: 0;
 }
 
 .bar-item {
@@ -899,16 +910,24 @@ table.data.user-table tbody tr:hover {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 128px;
 }
 
 .bar-slot {
+  width: 100%;
   height: 96px;
   display: flex;
   align-items: flex-end;
+  justify-content: center;
 }
 
+/* 柱子直接占满自己的份宽：份宽由「品类宽度 ÷ 该品类商品数」决定，
+   商品少的品类靠 max-width 封顶，不会把孤柱拉成色块。 */
 .bar {
-  width: 14px;
+  width: 100%;
+  max-width: 30px;
   border-radius: 3px 3px 1px 1px;
   position: relative;
   display: flex;
@@ -918,7 +937,7 @@ table.data.user-table tbody tr:hover {
 
 /* 本品：实心品牌渐变 + 轻微投影，视觉上压过竞品 */
 .bar-own {
-  width: 17px;
+  max-width: 34px;
   background: linear-gradient(180deg, #14b8a6, var(--brand));
   box-shadow: 0 1px 2px rgba(15, 118, 110, 0.28);
 }
@@ -937,30 +956,52 @@ table.data.user-table tbody tr:hover {
   background: #eef2f6;
 }
 
+/* 数量标签：统一贴在柱顶上方，宽度不受柱子宽度限制。
+   一列柱子高低不同时，标签若时而写进柱身、时而浮在柱外，视线要来回跳；
+   统一到柱顶外侧后基线一致，逐个扫读不用重新定位。
+   白色描边（text-shadow 光晕）让相邻两列贴得近时数字也不粘连。 */
 .bar-val {
   position: absolute;
-  top: -15px;
-  font-size: 10px;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  line-height: 1;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--ink-3);
+  color: var(--ink-2, #334155);
   white-space: nowrap;
+  pointer-events: none;
+  text-shadow:
+    0 0 2px #fff,
+    0 0 2px #fff,
+    0 0 3px #fff;
 }
 
 .bar-own .bar-val {
   color: var(--brand-dark);
+}
+
+.bar-comp .bar-val {
+  color: #64748b;
   font-weight: 650;
 }
 
-/* 商品名：本品加粗上色，竞品淡一些，扫一眼就能分辨 */
+/* 商品名：本品加粗上色，竞品淡一些，扫一眼就能分辨。
+   品类等分后单列可能很窄（如某品类 8 个商品），因此允许折成两行，
+   超出两行才省略；完整名称另有 title 提示，不靠文字硬撑。 */
 .bar-name {
-  font-size: 10.5px;
-  line-height: 1.2;
+  width: 100%;
+  max-width: 68px;
+  font-size: clamp(9px, 1.05vw, 10.5px);
+  line-height: 1.15;
   color: var(--ink-3);
-  max-width: 62px;
   text-align: center;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .bar-item-own .bar-name {
@@ -1305,11 +1346,78 @@ table.heat td.tap:hover {
   word-break: break-word;
   font-size: 12.5px;
   color: var(--ink-2);
+  line-height: 1.6;
+}
+
+/* 详情按行渲染：默认只露 2 行，避免一条长变更把整张表撑开 */
+.log-detail .dl-line {
+  display: block;
+}
+
+.log-detail .dl-body:not(.open) {
+  max-height: 3.2em;
+  overflow: hidden;
+}
+
+.log-detail.foldable .dl-body:not(.open) {
+  /* 折叠时底部淡出，暗示下面还有内容 */
+  -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+}
+
+.log-detail .dl-toggle {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--brand, #0f766e);
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.log-detail .dl-toggle:hover {
+  text-decoration: underline;
+}
+
+.log-detail .dl-toggle:focus-visible {
+  outline: 2px solid var(--brand, #0f766e);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 
 .device-cell {
   font-size: 12px;
   color: var(--ink-2);
+}
+
+/* 操作人：门店操作为「门店编码 + 门店名称 + 角色 · 店员」，账号操作为「账号 + 姓名 + 角色」 */
+.actor-cell {
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.actor-cell .ac-account,
+.actor-cell .ac-store {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.actor-cell .ac-store {
+  color: var(--brand-dark);
+  font-weight: 650;
+}
+
+.actor-cell .ac-name {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.actor-cell .tiny {
+  display: block;
 }
 
 .device-cell .fp {
@@ -1702,15 +1810,15 @@ table.heat td.tap:hover {
   }
 
   .bar-cat {
-    padding: 0 8px;
+    padding: 0 6px;
   }
 
   .bar-cat-bars {
-    gap: 5px;
+    gap: 4px;
   }
 
   .bar-name {
-    max-width: 50px;
+    max-width: 56px;
   }
 
   .toolbar .search-box {

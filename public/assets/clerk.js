@@ -19,14 +19,13 @@
     confirmDialog,
     copyText,
     logout,
-    money,
   } = window.SSD;
 
   const state = {
     store: null,
     home: null,
     wizard: null, // { date, period, products, nextProduct, progress, readyToSubmit, images }
-    values: new Map(), // productId -> { qty, amount }
+    values: new Map(), // productId -> { qty }
     busy: false,
     // 本地暂存：避免误触返回丢失已填内容
     draftKey: '',
@@ -249,7 +248,7 @@
       return;
     }
 
-    const draft = state.values.get(product.id) || { qty: '', amount: '' };
+    const draft = state.values.get(product.id) || { qty: '' };
     viewWizard.innerHTML = `
       ${head}
       <div class="product-stage" style="margin-top:14px">
@@ -257,25 +256,14 @@
         <h2 class="product-name">${escapeHtml(product.alias)}</h2>
         <p class="product-meta">第 ${done + 1} 个，共 ${total} 个</p>
 
-        <div class="qty-amount">
-          <div>
-            <label class="tiny muted" style="display:block;text-align:left;margin-bottom:6px;font-weight:600">销售数量</label>
-            <div class="qty-stepper">
-              <button type="button" data-step="-1" aria-label="减少">−</button>
-              <input id="qty-input" type="number" inputmode="numeric" pattern="[0-9]*"
-                     min="0" step="1" value="${draft.qty === '' ? '' : Number(draft.qty)}"
-                     placeholder="0" aria-label="销售数量">
-              <button type="button" data-step="1" aria-label="增加">+</button>
-            </div>
-          </div>
-          <div>
-            <label class="tiny muted" style="display:block;text-align:left;margin-bottom:6px;font-weight:600">销售金额</label>
-            <div class="amount-wrap">
-              <span class="unit">¥</span>
-              <input class="input" id="amount-input" type="number" inputmode="decimal"
-                     min="0" step="0.01" value="${draft.amount === '' ? '' : Number(draft.amount)}"
-                     placeholder="0.00" aria-label="销售金额">
-            </div>
+        <div class="qty-field">
+          <label class="tiny muted" for="qty-input">销售数量</label>
+          <div class="qty-stepper">
+            <button type="button" data-step="-1" aria-label="减少">−</button>
+            <input id="qty-input" type="number" inputmode="numeric" pattern="[0-9]*"
+                   min="0" step="1" value="${draft.qty === '' ? '' : Number(draft.qty)}"
+                   placeholder="0" aria-label="销售数量">
+            <button type="button" data-step="1" aria-label="增加">+</button>
           </div>
         </div>
       </div>
@@ -320,36 +308,27 @@
 
   function bindStepControls(product) {
     const qtyInput = $('#qty-input');
-    const amountInput = $('#amount-input');
     const tip = $('#wizard-tip');
 
     const sync = () => {
       const qty = qtyInput.value === '' ? '' : Number(qtyInput.value);
-      const amount = amountInput.value === '' ? '' : Number(amountInput.value);
-      state.values.set(product.id, { qty, amount });
+      state.values.set(product.id, { qty });
       saveDraft();
       const ready = qty !== '' && Number(qty) >= 0;
       $('#confirm-btn').disabled = !ready;
       tip.textContent = ready
         ? '确认后自动进入下一个商品'
         : '请填写销售数量（无销售请填 0）';
-      // 数量与金额自动联动提示：金额留空按数量 × 0 处理不符合直觉，这里只做提示
-      if (ready && amount === '' && Number(qty) > 0) {
-        tip.textContent = '金额未填写将按 0 计入，建议补充销售金额';
-      }
     };
 
     qtyInput.addEventListener('input', sync);
-    amountInput.addEventListener('input', sync);
     // 回车 = 确认当前商品
-    [qtyInput, amountInput].forEach((el) =>
-      el.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          confirmCurrent();
-        }
-      }),
-    );
+    qtyInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        confirmCurrent();
+      }
+    });
 
     viewWizard.querySelectorAll('[data-step]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -434,13 +413,8 @@
     if (!w || !product || state.busy) return;
     const value = state.values.get(product.id) || {};
     const qty = value.qty === '' || value.qty == null ? null : Number(value.qty);
-    const amount = value.amount === '' || value.amount == null ? 0 : Number(value.amount);
     if (qty == null || !Number.isInteger(qty) || qty < 0) {
       toast('请填写正确的销售数量', 'err');
-      return;
-    }
-    if (!Number.isFinite(amount) || amount < 0) {
-      toast('请填写正确的销售金额', 'err');
       return;
     }
 
@@ -456,7 +430,6 @@
         period: w.period,
         productId: product.id,
         qty,
-        amount,
       });
       state.values.delete(product.id);
       saveDraft();
@@ -520,7 +493,7 @@
         body: `<div style="text-align:center;padding:6px 0 2px">
                  <div style="font-size:36px">🎉</div>
                  <p style="margin:10px 0 4px;font-size:15px;font-weight:600">${escapeHtml(data.date)} ${escapeHtml(data.periodLabel)}</p>
-                 <p class="small muted" style="margin:0">${data.itemCount} 个商品 · 数量 ${data.totalQty} · 金额 ¥${money(data.totalAmount)}</p>
+                 <p class="small muted" style="margin:0">${data.itemCount} 个商品 · 数量 ${data.totalQty}</p>
                </div>`,
         footer: '<button class="btn btn-block" data-act="close" type="button">完成</button>',
       }).root.querySelector('[data-act="close"]')
@@ -558,7 +531,7 @@
       body: `<div class="small" style="line-height:1.8;color:var(--ink-2)">
         <p style="margin:0 0 8px"><b>每天两次提交</b>：上午、下午各提交一次，当天 24:00 前完成。</p>
         <p style="margin:0 0 8px"><b>补交规则</b>：昨日数据可在今天 12:00 前补交，逾期需联系管理员。</p>
-        <p style="margin:0 0 8px"><b>商品逐个确认</b>：页面一次显示一个商品，填写数量与金额后点「确认」进入下一个；全部确认后按钮变为「提交」。</p>
+        <p style="margin:0 0 8px"><b>商品逐个确认</b>：页面一次显示一个商品，填写数量后点「确认」进入下一个；全部确认后按钮变为「提交」。</p>
         <p style="margin:0 0 8px"><b>无销售也要填</b>：数量填 0 即可，确保每个商品都有记录。</p>
         <p style="margin:0"><b>提交后锁定</b>：如需更正请联系管理员。</p>
       </div>`,

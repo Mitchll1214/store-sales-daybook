@@ -10,7 +10,30 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'%3E集%3C/text%3E%3C/svg%3E">
 </head>
 <body>
-  <main class="auth-shell">
+  <main class="auth-shell auth-shell--split">
+    <!-- 品牌区：仅宽屏显示，交代系统用途，避免登录页空旷 -->
+    <aside class="auth-brand" aria-hidden="true">
+      <div class="auth-brand-top">
+        <div class="brand-logo">集</div>
+        <span id="brand-wordmark">店销日集</span>
+      </div>
+
+      <div class="auth-brand-main">
+        <div class="auth-brand-copy">
+          <h2>门店每天的销量，<br>录完就自动汇总</h2>
+          <p>店员用手机按引导登记上午、下午两班，总部当天就能看到各店进度，不用再翻聊天记录对数。</p>
+        </div>
+
+        <ul class="auth-brand-points">
+          <li><span class="dot"></span>每家门店一个专属链接，扫码即可填报</li>
+          <li><span class="dot"></span>按门店与品类自动汇总，完成情况当天可见</li>
+          <li><span class="dot"></span>填报与关键操作全程留痕，可追溯到人</li>
+        </ul>
+      </div>
+
+      <p class="auth-brand-foot">© <span id="brand-year"></span> 店销日集</p>
+    </aside>
+
     <form class="auth-card" id="login-form" autocomplete="on" novalidate>
       <div class="brand-mark">
         <div class="brand-logo">集</div>
@@ -20,19 +43,38 @@
         </div>
       </div>
 
-      <div class="form-error hidden" id="form-error" role="alert"></div>
+      <h2 class="auth-title">登录后台</h2>
+      <p class="auth-sub">使用管理员或店员账号继续</p>
+
+      <div class="form-error hidden" id="form-error" role="alert" aria-live="assertive"></div>
 
       <div class="field">
         <label for="username">账号</label>
-        <input class="input" id="username" name="username" type="text"
-               autocomplete="username" inputmode="text" placeholder="请输入账号" required
-               autocapitalize="none" spellcheck="false">
+        <div class="input-wrap">
+          <span class="input-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.2" r="3.6"/>
+              <path d="M4.8 20c0-3.5 3.2-6 7.2-6s7.2 2.5 7.2 6"/></svg>
+          </span>
+          <input class="input" id="username" name="username" type="text"
+                 autocomplete="username" inputmode="text" placeholder="请输入账号" required
+                 autocapitalize="none" spellcheck="false">
+        </div>
       </div>
 
       <div class="field">
         <label for="password">密码</label>
-        <input class="input" id="password" name="password" type="password"
-               autocomplete="current-password" placeholder="请输入密码" required>
+        <div class="input-wrap input-wrap--action">
+          <span class="input-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round" stroke-linejoin="round"><rect x="4.6" y="10.4" width="14.8" height="9.6" rx="2.4"/>
+              <path d="M8.2 10.4V7.6a3.8 3.8 0 0 1 7.6 0v2.8"/></svg>
+          </span>
+          <input class="input" id="password" name="password" type="password"
+                 autocomplete="current-password" placeholder="请输入密码" required>
+          <button class="input-action" type="button" id="toggle-password"
+                  aria-label="显示密码" aria-pressed="false" title="显示密码">显示</button>
+        </div>
       </div>
 
       <button class="btn btn-block btn-lg" type="submit" id="submit-btn">登 录</button>

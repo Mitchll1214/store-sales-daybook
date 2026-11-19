@@ -130,7 +130,7 @@ function createReportRoutes({ db, audit }) {
       if (rows.length === 0) {
         return res.status(404).json({ error: '所选范围内没有销售明细可导出' });
       }
-      const header = ['日期', '时段', '门店编码', '门店名称', '品名', '别名', '条码', '数量', '金额', '提交时间', '提交人'];
+      const header = ['日期', '时段', '门店编码', '门店名称', '品名', '别名', '条码', '数量', '提交时间', '提交人'];
       const body = rows.map((r) => [
         r.date,
         r.periodLabel,
@@ -140,20 +140,21 @@ function createReportRoutes({ db, audit }) {
         r.alias,
         r.barcode,
         r.qty,
-        r.amount,
         r.submittedAt,
         r.submitter,
       ]);
       const totalQty = rows.reduce((s, r) => s + r.qty, 0);
-      const totalAmount = Math.round(rows.reduce((s, r) => s + r.amount, 0) * 100) / 100;
-      body.push([], ['合计', '', '', '', '', '', '', totalQty, totalAmount, '', '']);
+      body.push([], ['合计', '', '', '', '', '', '', totalQty, '', '']);
       const csv = toCsv([header, ...body]);
       const filename = `销售明细_${from}_${to}${period ? `_${PERIOD_LABEL[period]}` : ''}.csv`;
 
       audit.log(req, {
         action: 'report_export',
         targetType: 'report',
-        detail: `导出销售明细 ${from} ~ ${to}${period ? `（${PERIOD_LABEL[period]}）` : ''}，共 ${rows.length} 行，金额合计 ${totalAmount}`,
+        detail: {
+          summary: `导出销售明细 ${from} ~ ${to}${period ? `（${PERIOD_LABEL[period]}）` : ''}`,
+          context: { rows: rows.length, period: period || '全部时段' },
+        },
       });
 
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

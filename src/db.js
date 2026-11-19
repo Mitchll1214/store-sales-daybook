@@ -7,7 +7,7 @@ const { Database } = require('./sqlite');
 const { DATA_DIR, UPLOAD_DIR, nowStamp } = require('./util');
 const { hashPassword, verifyPassword } = require('./security');
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 6;
 
 /** 商品属性：本品 / 竞品。未设置的一律按竞品统计（数据库默认 'comp'）。 */
 const PRODUCT_KINDS = ['own', 'comp'];
@@ -137,19 +137,22 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id     INTEGER,
-  actor_name  TEXT NOT NULL,
-  actor_role  TEXT,
-  action      TEXT NOT NULL,
-  target_type TEXT,
-  target_id   TEXT,
-  detail      TEXT,
-  ip          TEXT,
-  ip_location TEXT,
-  device_id   TEXT,
-  ua          TEXT,
-  created_at  TEXT NOT NULL
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id        INTEGER,
+  actor_name     TEXT NOT NULL,
+  actor_username TEXT,
+  actor_store_code TEXT,
+  actor_store_name TEXT,
+  actor_role     TEXT,
+  action         TEXT NOT NULL,
+  target_type    TEXT,
+  target_id      TEXT,
+  detail         TEXT,
+  ip             TEXT,
+  ip_location    TEXT,
+  device_id      TEXT,
+  ua             TEXT,
+  created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
@@ -174,6 +177,9 @@ function ensureDirs() {
 function openDatabase() {
   ensureDirs();
   const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(DATA_DIR, 'app.db');
+  // 启动即打印实际落点：排查「重建后数据不见了」时，第一步就是确认它读的是不是原来那个库。
+  // 若这里显示的是新建文件，说明数据卷没挂上或路径被改过，而不是数据被清空。
+  console.log(`[db] 数据库：${dbPath}（${fs.existsSync(dbPath) ? '已存在' : '新建'}）`);
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
@@ -204,6 +210,36 @@ function migrate(db) {
       if (!cols.includes('kind')) {
         db.exec("ALTER TABLE products ADD COLUMN kind TEXT NOT NULL DEFAULT 'comp'");
       }
+    }
+    // v5：审计日志新增「操作人账号」列（原来只有姓名，同名时无法区分）。
+    if (current < 5) {
+      const cols = db.prepare('PRAGMA table_info(audit_logs)').all().map((c) => c.name);
+      if (!cols.includes('actor_username')) {
+        db.exec('ALTER TABLE audit_logs ADD COLUMN actor_username TEXT');
+      }
+      // 老日志只存了 user_id 与姓名，按 user_id 回填账号，让操作人列统一显示「账号 + 姓名」。
+      // 系统动作（actor_name='system'）不回填，避免显示成「admin / system」这种矛盾组合。
+      db.exec(`UPDATE audit_logs
+                  SET actor_username = (SELECT username FROM users WHERE users.id = audit_logs.user_id)
+                WHERE actor_username IS NULL AND user_id IS NOT NULL AND actor_name <> 'system'`);
+    }
+    // v6：审计日志新增「操作人门店」两列。门店操作（免登录链接 / 绑定门店的店员）
+    // 只记姓名时看不出是哪家店做的，操作记录里要能直接读到「门店编码 / 门店名称」。
+    if (current < 6) {
+      const cols = db.prepare('PRAGMA table_info(audit_logs)').all().map((c) => c.name);
+      if (!cols.includes('actor_store_code')) {
+        db.exec('ALTER TABLE audit_logs ADD COLUMN actor_store_code TEXT');
+      }
+      if (!cols.includes('actor_store_name')) {
+        db.exec('ALTER TABLE audit_logs ADD COLUMN actor_store_name TEXT');
+      }
+      // 老日志里 target_type='store' 的动作，目标就是门店本身，按 target_id 回填门店编码与名称。
+      db.exec(`UPDATE audit_logs
+                  SET actor_store_code = (SELECT code FROM stores WHERE stores.id = audit_logs.target_id),
+                      actor_store_name = (SELECT name FROM stores WHERE stores.id = audit_logs.target_id)
+                WHERE actor_store_code IS NULL
+                  AND target_type = 'store'
+                  AND target_id GLOB '[0-9]*'`);
     }
     if (current < SCHEMA_VERSION) db.pragma(`user_version = ${SCHEMA_VERSION}`);
   });

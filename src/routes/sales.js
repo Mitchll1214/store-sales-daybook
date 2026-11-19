@@ -22,11 +22,6 @@ const {
 const { productsForStore, submissionIndex, clerkHome } = require('../report');
 
 const MAX_QTY = 1_000_000;
-const MAX_AMOUNT = 100_000_000;
-
-function round2(n) {
-  return Math.round(n * 100) / 100;
-}
 
 /** 店员会话必须有门店上下文 */
 function requireStoreContext(req) {
@@ -36,16 +31,13 @@ function requireStoreContext(req) {
   return req.user.storeId;
 }
 
+/** 填报只收集数量：本系统不统计销售金额 */
 function shapeEntryInput(raw) {
   const qty = Number(raw.qty ?? 0);
-  const amount = Number(raw.amount ?? 0);
   if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 0 || qty > MAX_QTY) {
     throw new HttpError(400, '数量需为 0 以上的整数');
   }
-  if (!Number.isFinite(amount) || amount < 0 || amount > MAX_AMOUNT) {
-    throw new HttpError(400, '金额不合法');
-  }
-  return { qty, amount: round2(amount) };
+  return { qty };
 }
 
 /**
@@ -209,15 +201,15 @@ function createSalesRoutes({ db, audit }) {
       if (!allowed.includes(productId)) {
         throw new HttpError(400, '该商品不在本门店可填报范围内');
       }
-      const { qty, amount } = shapeEntryInput(req.body);
+      const { qty } = shapeEntryInput(req.body);
 
       db.prepare(
-        `INSERT INTO sale_entries (store_id, biz_date, period, product_id, qty, amount, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sale_entries (store_id, biz_date, period, product_id, qty, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(store_id, biz_date, period, product_id)
-         DO UPDATE SET qty = excluded.qty, amount = excluded.amount,
+         DO UPDATE SET qty = excluded.qty,
                        updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
-      ).run(storeId, date, period, productId, qty, amount, req.user.id, nowStamp());
+      ).run(storeId, date, period, productId, qty, req.user.id, nowStamp());
 
       const wizard = buildWizard(storeId, date, period);
       res.json({
@@ -241,10 +233,10 @@ function createSalesRoutes({ db, audit }) {
       if (products.length === 0) throw new HttpError(400, '门店暂无可填报商品');
       const stamp = nowStamp();
       const upsert = db.prepare(
-        `INSERT INTO sale_entries (store_id, biz_date, period, product_id, qty, amount, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, 0, 0, ?, ?)
+        `INSERT INTO sale_entries (store_id, biz_date, period, product_id, qty, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, 0, ?, ?)
          ON CONFLICT(store_id, biz_date, period, product_id)
-         DO UPDATE SET qty = 0, amount = 0, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+         DO UPDATE SET qty = 0, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
       );
       db.transaction(() => {
         for (const p of products) upsert.run(storeId, date, period, p.id, req.user.id, stamp);
@@ -253,7 +245,11 @@ function createSalesRoutes({ db, audit }) {
         action: 'sales_fill_zero',
         targetType: 'store',
         targetId: storeId,
-        detail: `${date} ${PERIOD_LABEL[period]} 批量记为 0（共 ${products.length} 个商品，尚未提交）`,
+        detail: {
+          summary: `${date} ${PERIOD_LABEL[period]} 批量记为 0`,
+          context: { item_count: products.length },
+          note: '尚未提交，仍需点击提交才会进入统计',
+        },
       });
       const wizard = buildWizard(storeId, date, period);
       res.json({ ok: true, progress: wizard.progress, nextProduct: wizard.nextProduct, readyToSubmit: wizard.readyToSubmit });
@@ -273,7 +269,7 @@ function createSalesRoutes({ db, audit }) {
       if (products.length === 0) throw new HttpError(400, '门店暂无可填报商品，请联系管理员');
       const entries = db
         .prepare(
-          `SELECT e.product_id, e.qty, e.amount
+          `SELECT e.product_id, e.qty
            FROM sale_entries e
            JOIN products p ON p.id = e.product_id
            WHERE e.store_id = ? AND e.biz_date = ? AND e.period = ? AND p.status = 'active'`,
@@ -290,20 +286,26 @@ function createSalesRoutes({ db, audit }) {
       }
 
       const totalQty = entries.reduce((s, e) => s + e.qty, 0);
-      const totalAmount = round2(entries.reduce((s, e) => s + e.amount, 0));
       const stamp = nowStamp();
       try {
         db.transaction(() => {
           db.prepare(
             `INSERT INTO sale_submissions
-             (store_id, biz_date, period, item_count, total_qty, total_amount, submitted_by, submitter_name, submitted_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).run(storeId, date, period, products.length, totalQty, totalAmount, req.user.id, req.user.name, stamp);
+             (store_id, biz_date, period, item_count, total_qty, submitted_by, submitter_name, submitted_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(storeId, date, period, products.length, totalQty, req.user.id, req.user.name, stamp);
           audit.log(req, {
             action: 'sales_submit',
             targetType: 'store',
             targetId: storeId,
-            detail: `提交 ${date} ${PERIOD_LABEL[period]} 销售数据：${products.length} 个商品，总量 ${totalQty}，总金额 ${totalAmount}`,
+            detail: {
+              summary: `提交 ${date} ${PERIOD_LABEL[period]} 销售数据`,
+              context: {
+                item_count: products.length,
+                total_qty: totalQty,
+                submitter: req.user.name,
+              },
+            },
           });
         })();
       } catch (err) {
@@ -320,7 +322,6 @@ function createSalesRoutes({ db, audit }) {
         submittedAt: stamp,
         itemCount: products.length,
         totalQty,
-        totalAmount,
       });
     }),
   );
@@ -362,7 +363,14 @@ function createSalesRoutes({ db, audit }) {
         action: 'image_upload',
         targetType: 'image',
         targetId: info.lastInsertRowid,
-        detail: `${date} ${PERIOD_LABEL[period]} 上传凭证图片 ${req.file.originalname || req.file.filename}`,
+        detail: {
+          summary: `${date} ${PERIOD_LABEL[period]} 上传凭证图片`,
+          context: {
+            file: req.file.originalname || req.file.filename,
+            size: `${Math.round((req.file.size || 0) / 1024)} KB`,
+            mime: req.file.mimetype,
+          },
+        },
       });
       res.status(201).json({
         ok: true,
@@ -409,9 +417,15 @@ function createSalesRoutes({ db, audit }) {
         action: 'image_delete',
         targetType: 'image',
         targetId: image.id,
-        detail: `删除门店 #${image.store_id} ${image.biz_date} ${PERIOD_LABEL[image.period] || image.period} 的凭证图片 ${
-          image.original_name || image.stored_name
-        }`,
+        detail: {
+          summary: `删除 ${image.biz_date} ${PERIOD_LABEL[image.period] || image.period} 的凭证图片`,
+          context: {
+            store_id: `#${image.store_id}`,
+            file: image.original_name || image.stored_name,
+            size: `${Math.round((image.size || 0) / 1024)} KB`,
+          },
+          note: isAdmin && !isOwner ? '由总部管理员跨门店删除' : null,
+        },
       });
       res.json({ ok: true });
     }),

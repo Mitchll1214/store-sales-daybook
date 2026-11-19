@@ -42,7 +42,10 @@ function createAuthRoutes({ db, auth, audit, limiter }) {
           action: 'login_blocked',
           targetType: 'user',
           targetId: username,
-          detail: '连续登录失败次数过多，已临时限制',
+          detail: {
+            summary: `账号 ${username} 连续登录失败次数过多`,
+            note: '已在当前 IP 上临时限制登录，10 分钟后自动解除',
+          },
         });
         return res.status(429).json({ error: '登录失败次数过多，请 10 分钟后再试' });
       }
@@ -53,7 +56,7 @@ function createAuthRoutes({ db, auth, audit, limiter }) {
           action: 'login_failed',
           targetType: 'user',
           targetId: username,
-          detail: result.reason,
+          detail: { summary: `账号 ${username} 登录失败`, note: result.reason },
         });
         return res.status(401).json({ error: result.reason });
       }
@@ -62,7 +65,10 @@ function createAuthRoutes({ db, auth, audit, limiter }) {
         action: 'login',
         targetType: 'user',
         targetId: result.user.id,
-        detail: `账号 ${result.user.username} 登录成功`,
+        detail: {
+          summary: `账号 ${result.user.username}（${result.user.display_name}）登录成功`,
+          context: { role: result.user.role },
+        },
         actor: { id: result.user.id, name: result.user.display_name, role: result.user.role },
       });
       const user = req.user;
@@ -80,7 +86,11 @@ function createAuthRoutes({ db, auth, audit, limiter }) {
     '/logout',
     asyncHandler(async (req, res) => {
       if (req.user) {
-        audit.log(req, { action: 'logout', detail: '主动退出登录' });
+        audit.log(req, {
+          action: 'logout',
+          detail: { summary: '主动退出登录', context: { role: req.user.role } },
+        });
+
       }
       if (req.session) auth.destroySession(req.session.token);
       res.append(
@@ -129,7 +139,11 @@ function createAuthRoutes({ db, auth, audit, limiter }) {
         action: 'password_change',
         targetType: 'user',
         targetId: row.id,
-        detail: `用户 ${row.username} 修改了登录密码（其他设备已强制下线）`,
+        detail: {
+          summary: `账号 ${row.username}（${row.display_name}）修改了登录密码`,
+          context: { role: row.role },
+          note: '其他设备的登录状态已强制下线',
+        },
       });
       res.json({ ok: true });
     }),

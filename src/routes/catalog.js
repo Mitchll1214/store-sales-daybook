@@ -147,7 +147,16 @@ function createProductRoutes({ db, audit }) {
         action: 'product_create',
         targetType: 'product',
         targetId: product.id,
-        detail: `新增商品 ${name}（别名 ${alias}${barcode ? `，条码 ${barcode}` : ''}${category ? `，品类 ${category}` : ''}，${KIND_LABEL[kind]}）`,
+        detail: {
+          summary: `新增商品 ${name}`,
+          context: {
+            alias,
+            barcode: barcode || null,
+            category: category || '未分类',
+            kind: KIND_LABEL[kind],
+            status,
+          },
+        },
       });
       res.status(201).json({ ok: true, product: shape(product) });
     }),
@@ -190,7 +199,17 @@ function createProductRoutes({ db, audit }) {
       audit.log(req, {
         action: 'product_batch_create',
         targetType: 'product',
-        detail: `批量导入商品 ${created.length} 条，跳过 ${skipped.length} 条`,
+        detail: {
+          summary: `批量导入商品成功 ${created.length} 条，跳过 ${skipped.length} 条`,
+          context: {
+            category: created.length && created[0].category ? created[0].category : null,
+          },
+          note: skipped.length
+            ? `跳过行：${skipped.slice(0, 10).map((s) => `第 ${s.line} 行 ${s.reason}`).join('；')}${
+                skipped.length > 10 ? `；等共 ${skipped.length} 行` : ''
+              }`
+            : null,
+        },
       });
       res.json({ ok: true, created, skipped });
     }),
@@ -218,13 +237,25 @@ function createProductRoutes({ db, audit }) {
       db.prepare(
         'UPDATE products SET name = ?, alias = ?, barcode = ?, category = ?, kind = ?, status = ?, updated_at = ? WHERE id = ?',
       ).run(name, alias, barcode, category, kind, status, nowStamp(), product.id);
-      const detail =
-        product.status !== status
-          ? `商品 ${product.name} 状态改为 ${status === 'active' ? '启用' : '禁用（不参与填报与统计）'}`
-          : `修改商品 ${product.name} → ${name}（别名 ${product.alias} → ${alias}，品类 ${product.category || '未分类'} → ${
-              category || '未分类'
-            }，属性 ${KIND_LABEL[normalizeKind(product.kind)]} → ${KIND_LABEL[kind]}）`;
-      audit.log(req, { action: 'product_update', targetType: 'product', targetId: product.id, detail });
+      audit.log(req, {
+        action: 'product_update',
+        targetType: 'product',
+        targetId: product.id,
+        detail: {
+          summary: product.status !== status
+            ? `商品 ${product.name} 状态改为${status === 'active' ? '启用' : '禁用'}`
+            : `修改商品 ${product.name} → ${name}`,
+          changes: [
+            { field: 'name', from: product.name, to: name },
+            { field: 'alias', from: product.alias, to: alias },
+            { field: 'barcode', from: product.barcode || '', to: barcode || '' },
+            { field: 'category', from: product.category || '', to: category || '' },
+            { field: 'kind', from: KIND_LABEL[normalizeKind(product.kind)], to: KIND_LABEL[kind] },
+            { field: 'status', from: product.status, to: status },
+          ],
+          note: status === 'disabled' ? '禁用后不参与门店填报与统计' : null,
+        },
+      });
       res.json({ ok: true, product: shape(db.prepare('SELECT * FROM products WHERE id = ?').get(product.id)) });
     }),
   );
@@ -245,7 +276,16 @@ function createProductRoutes({ db, audit }) {
         action: 'product_delete',
         targetType: 'product',
         targetId: product.id,
-        detail: `删除商品 ${product.name}（别名 ${product.alias}）`,
+        detail: {
+          summary: `删除商品 ${product.name}`,
+          context: {
+            alias: product.alias,
+            barcode: product.barcode || null,
+            category: product.category || null,
+            kind: KIND_LABEL[normalizeKind(product.kind)],
+          },
+          note: '已确认该商品没有销售记录',
+        },
       });
       res.json({ ok: true });
     }),

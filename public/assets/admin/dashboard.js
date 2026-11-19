@@ -29,6 +29,16 @@
     return Math.max(3, Math.round((qty / max) * MAX_BAR));
   }
 
+  /**
+   * 数量标签统一落在柱顶上方：一列柱子高低不同时，标签若时而写进柱身、时而浮在柱外，
+   * 视线要来回跳；统一到柱顶外侧后基线一致，逐个扫读不用重新定位。
+   * 数字带白色光晕，即使相邻两列贴得很近也不会糊在一起。
+   */
+  function valueLabel(value) {
+    if (!(value > 0)) return '';
+    return `<span class="bar-val">${value}</span>`;
+  }
+
   /** 单根商品柱：一个商品一柱，本品用品牌色描实，竞品用浅灰压在后面 */
   function productBar(item, max) {
     const value = Number(item.qty) || 0;
@@ -41,7 +51,7 @@
     return `<div class="bar-item bar-item-${kind}" title="${escapeHtml(title)}">
         <div class="bar-slot">
           <div class="bar bar-${kind}${value > 0 ? '' : ' zero'}" style="height:${height}px">
-            ${value > 0 ? `<span class="bar-val">${value}</span>` : ''}
+            ${valueLabel(value)}
           </div>
         </div>
         <div class="bar-name">${escapeHtml(short)}</div>

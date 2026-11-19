@@ -151,9 +151,17 @@ function createUserRoutes({ db, audit }) {
         action: 'user_create',
         targetType: 'user',
         targetId: userId,
-        detail: `创建${ROLE_LABEL[role]}账号 ${username}（${displayName}）${
-          role === 'clerk' && storeId ? `，绑定门店 #${storeId}` : ''
-        }${role === 'region_admin' ? `，管辖门店 ${storeIds.join(',')}` : ''}`,
+        detail: {
+          summary: `创建${ROLE_LABEL[role]}账号 ${username}（${displayName}）`,
+          context: {
+            role,
+            display_name: displayName,
+            phone: req.body.phone || null,
+            store_id: role === 'clerk' && storeId ? `#${storeId}` : null,
+            storeIds: role === 'region_admin' && storeIds.length ? storeIds.join('、') : null,
+          },
+          note: '首次登录需修改初始密码',
+        },
       });
       const row = db.prepare(`${SELECT_BASE} WHERE u.id = ?`).get(userId);
       res.status(201).json({ ok: true, user: shape(row) });
@@ -206,7 +214,17 @@ function createUserRoutes({ db, audit }) {
         action: 'user_update',
         targetType: 'user',
         targetId: user.id,
-        detail: `修改账号 ${user.username}：姓名 ${user.display_name} → ${displayName}，状态 ${user.status} → ${status}`,
+        detail: {
+          summary: `修改账号 ${user.username}`,
+          changes: [
+            { field: 'display_name', from: user.display_name, to: displayName },
+            { field: 'phone', from: user.phone || '', to: phone || '' },
+            { field: 'status', from: user.status, to: status },
+            { field: 'store_id', from: user.store_id || '', to: storeId || '' },
+          ],
+          context: { role: user.role },
+          note: status === 'disabled' ? '该账号在线会话已全部失效' : null,
+        },
       });
       res.json({ ok: true, user: shape(db.prepare(`${SELECT_BASE} WHERE u.id = ?`).get(user.id)) });
     }),
@@ -232,7 +250,11 @@ function createUserRoutes({ db, audit }) {
         action: 'user_reset_password',
         targetType: 'user',
         targetId: user.id,
-        detail: `重置账号 ${user.username} 的密码，该账号所有登录状态已失效`,
+        detail: {
+          summary: `重置账号 ${user.username}（${user.display_name}）的登录密码`,
+          context: { role: user.role, status: user.status },
+          note: '该账号所有登录状态已失效，下次登录需修改密码',
+        },
       });
       res.json({ ok: true });
     }),

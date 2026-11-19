@@ -103,7 +103,13 @@ async function createApp() {
         targetType: 'store',
         targetId: result.store.id,
         detail: `通过免登录链接进入门店 ${result.store.code} ${result.store.name}`,
-        actor: { name: `${result.store.name}（免登录）`, role: 'clerk' },
+        actor: {
+          // 门店已经单独占两行展示，这里只标出「怎么进来的」，避免重复一遍店名
+          name: '免登录链接',
+          role: 'clerk',
+          storeCode: result.store.code,
+          storeName: result.store.name,
+        },
       });
       return res.redirect('/clerk');
     }),
@@ -113,9 +119,17 @@ async function createApp() {
   app.use(
     express.static(PUBLIC_DIR, {
       index: false,
-      maxAge: '1h',
+      etag: true,
+      lastModified: true,
       setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store');
+          return;
+        }
+        // CSS/JS 文件名没有内容指纹（始终是 app.css、common.js），若允许强缓存，
+        // 重建镜像后浏览器会拿「新 HTML + 旧缓存资源」，登录页等页面会错版。
+        // 改为每次协商：ETag 命中即 304，几乎零开销，也不会再出现版本错配。
+        res.setHeader('Cache-Control', 'no-cache');
       },
     }),
   );

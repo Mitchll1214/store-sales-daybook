@@ -251,7 +251,7 @@ async function main() {
       const r = await call(
         'PUT',
         '/api/sales/entry',
-        { date: session.data.date, period: 'am', productId: next.id, qty: 2, amount: 6.5 },
+        { date: session.data.date, period: 'am', productId: next.id, qty: 2 },
         { session: store },
       );
       assert.strictEqual(r.status, 200, JSON.stringify(r.data));
@@ -279,7 +279,7 @@ async function main() {
     assert.strictEqual(r.status, 409);
   });
   await check('提交后不可再改条目', async () => {
-    const r = await call('PUT', '/api/sales/entry', { date: today, period: 'am', productId: products[0].id, qty: 9, amount: 99 }, { session: store });
+    const r = await call('PUT', '/api/sales/entry', { date: today, period: 'am', productId: products[0].id, qty: 9 }, { session: store });
     assert.strictEqual(r.status, 409);
   });
   await check('店员首页显示上午已完成、下午待填', async () => {
@@ -297,7 +297,7 @@ async function main() {
   await check('昨日补交受 12:00 截止时间约束', async () => {
     // 用例本身不能依赖运行时时钟：12:00 前应可补交，12:00 后应锁定
     const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const r = await call('PUT', '/api/sales/entry', { date: y, period: 'am', productId: products[0].id, qty: 1, amount: 3 }, { session: store });
+    const r = await call('PUT', '/api/sales/entry', { date: y, period: 'am', productId: products[0].id, qty: 1 }, { session: store });
     if (new Date().getHours() < 12) {
       assert.strictEqual(r.status, 200, JSON.stringify(r.data));
     } else {
@@ -400,7 +400,8 @@ async function main() {
     assert.strictEqual(res.status, 200);
     const text = await res.text();
     assert.ok(res.headers.get('content-type').includes('text/csv'), '类型不是 CSV');
-    assert.ok(text.includes('门店编码') && text.includes('金额'));
+    assert.ok(text.includes('门店编码') && text.includes('数量'));
+    assert.ok(!text.includes('金额'), 'CSV 不应再包含金额列');
     assert.ok(text.includes('S001'));
     assert.ok(text.includes('合计'));
     assert.ok(/filename\*=UTF-8''/.test(res.headers.get('content-disposition') || ''));

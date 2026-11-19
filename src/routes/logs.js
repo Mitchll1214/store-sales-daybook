@@ -17,7 +17,6 @@ function createLogRoutes({ db, audit, ipdb }) {
       const data = audit.query({
         q: String(req.query.q || '').trim(),
         action: String(req.query.action || '').trim(),
-        ipLocation: String(req.query.ipLocation || '').trim(),
         from,
         to,
         page: Number(req.query.page) || 1,
@@ -43,10 +42,17 @@ function createLogRoutes({ db, audit, ipdb }) {
         action: 'ipdb_check',
         targetType: 'ipdb',
         detail: result.reachable
-          ? `校验 IP 库：${result.hasUpdate ? '发现新版本' : '已是最新'}（当前 ${result.current.revision || '未知'}，上游 ${
-              result.latest.revision || '未知'
-            }）`
-          : `校验 IP 库失败：${result.reason}`,
+          ? {
+              summary: `校验 IP 库：${result.hasUpdate ? '发现新版本' : '已是最新'}`,
+              context: {
+                current: result.current.revision ? String(result.current.revision).slice(0, 10) : '未知',
+                upstream: result.latest.revision ? String(result.latest.revision).slice(0, 10) : '未知',
+              },
+            }
+          : {
+              summary: '校验 IP 库失败',
+              note: result.reason,
+            },
       });
       res.json(result);
     }),
@@ -61,14 +67,24 @@ function createLogRoutes({ db, audit, ipdb }) {
         audit.log(req, {
           action: 'ipdb_update',
           targetType: 'ipdb',
-          detail: `更新 IP 库成功：版本 ${result.meta.revision || '未知'}，${result.meta.size} 字节`,
+          detail: {
+            summary: '更新 IP 库成功',
+            context: {
+              revision: result.meta.revision ? String(result.meta.revision).slice(0, 10) : '未知',
+              size: `${Math.round((result.meta.size || 0) / 1024)} KB`,
+              downloadSource: (result.via && result.via.label) || '未知',
+            },
+          },
         });
         res.json({ ok: true, ...result, status: ipdb.status() });
       } catch (err) {
         audit.log(req, {
           action: 'ipdb_update_failed',
           targetType: 'ipdb',
-          detail: `更新 IP 库失败：${err.message}`,
+          detail: {
+            summary: '更新 IP 库失败',
+            note: err.message,
+          },
         });
         throw new HttpError(502, err.message);
       }

@@ -8,6 +8,12 @@
   const note = $('#pwd-note');
   const submitBtn = $('#submit-btn');
 
+  // 三个密码框都提供显隐切换，规则与登录页一致
+  const { bindPasswordToggle } = window.SSD;
+  form.querySelectorAll('[data-toggle-password]').forEach((btn) => {
+    bindPasswordToggle($(`#${btn.dataset.togglePassword}`), btn);
+  });
+
   const next = (() => {
     const n = new URLSearchParams(location.search).get('next');
     return n && n.startsWith('/') && !n.startsWith('//') ? n : '';

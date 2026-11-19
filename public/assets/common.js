@@ -285,6 +285,34 @@
     }
   }
 
+  /* ---------------- 密码显隐 ---------------- */
+
+  /**
+   * 给密码框绑定「显示 / 隐藏」切换。
+   * 手机上输长密码容易打错，能看一眼比反复清空重输省事；
+   * 切换后保持光标在末尾，并把焦点还给输入框，避免键盘收起。
+   * @param {HTMLInputElement} input
+   * @param {HTMLButtonElement} button
+   */
+  function bindPasswordToggle(input, button) {
+    if (!input || !button) return;
+    button.addEventListener('click', () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      button.textContent = show ? '隐藏' : '显示';
+      button.setAttribute('aria-label', show ? '隐藏密码' : '显示密码');
+      button.setAttribute('aria-pressed', show ? 'true' : 'false');
+      button.title = show ? '隐藏密码' : '显示密码';
+      const end = input.value.length;
+      input.focus();
+      try {
+        input.setSelectionRange(end, end);
+      } catch {
+        /* 部分浏览器切换 password→text 后不支持选区，忽略 */
+      }
+    });
+  }
+
   /* ---------------- 弹窗 ---------------- */
 
   /**
@@ -393,6 +421,7 @@
     percentText,
     rateClass,
     copyText,
+    bindPasswordToggle,
     openModal,
     confirmDialog,
     promptDialog,

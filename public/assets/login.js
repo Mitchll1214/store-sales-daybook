@@ -17,10 +17,22 @@
     errorBox.textContent = '';
   }
 
+  // 页脚年份：避免硬编码过期
+  const yearEl = $('#brand-year');
+  if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+
+  // 密码显隐：手机上输长密码容易打错，能看一眼比反复重输省事
+  window.SSD.bindPasswordToggle($('#password'), $('#toggle-password'));
+
   api
     .get('/api/auth/bootstrap', { allowUnauthorized: true })
     .then((data) => {
-      if (data && data.brandName) $('#brand-name').textContent = data.brandName;
+      if (data && data.brandName) {
+        $('#brand-name').textContent = data.brandName;
+        // 左栏品牌区与表单标题共用同一个名称，避免两处文案不一致
+        const wordmark = $('#brand-wordmark');
+        if (wordmark) wordmark.textContent = data.brandName;
+      }
       document.title = `登录 · ${data.brandName || '店销日集'}`;
     })
     .catch(() => {

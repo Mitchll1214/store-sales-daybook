@@ -153,7 +153,16 @@ function createStoreRoutes({ db, audit }) {
       audit.log(req, {
         action: 'store_batch_create',
         targetType: 'store',
-        detail: `批量新增门店 ${created.length} 家，跳过 ${skipped.length} 家`,
+        detail: {
+          summary: `批量新增门店成功 ${created.length} 家，跳过 ${skipped.length} 家`,
+          note:
+            skipped.length
+              ? `跳过：${skipped
+                  .slice(0, 10)
+                  .map((s) => `${s.code} ${s.name}（${s.reason}）`)
+                  .join('；')}${skipped.length > 10 ? `；等共 ${skipped.length} 家` : ''}`
+              : null,
+        },
       });
       res.json({ ok: true, created, skipped, errors });
     }),
@@ -181,7 +190,11 @@ function createStoreRoutes({ db, audit }) {
         action: 'store_create',
         targetType: 'store',
         targetId: store.id,
-        detail: `新增门店 ${store.code} ${store.name}（免登录链接已生成）`,
+        detail: {
+          summary: `新增门店 ${store.code} ${store.name}`,
+          context: { status: store.status, remark: store.remark || null },
+          note: '免登录链接已生成',
+        },
       });
       res.status(201).json({ ok: true, store: shapeStore(req, store) });
     }),
@@ -228,7 +241,15 @@ function createStoreRoutes({ db, audit }) {
         action: 'store_update',
         targetType: 'store',
         targetId: store.id,
-        detail: `修改门店 ${store.code} ${store.name} → ${code} ${name}（状态 ${status}）`,
+        detail: {
+          summary: `修改门店 ${store.code} ${store.name}`,
+          changes: [
+            { field: 'code', from: store.code, to: code },
+            { field: 'name', from: store.name, to: name },
+            { field: 'status', from: store.status, to: status },
+            { field: 'remark', from: store.remark || '', to: remark || '' },
+          ],
+        },
       });
       res.json({ ok: true, store: shapeStore(req, loadStore(store.id)) });
     }),
@@ -250,7 +271,13 @@ function createStoreRoutes({ db, audit }) {
         action: enabled ? 'store_auto_login_enable' : 'store_auto_login_disable',
         targetType: 'store',
         targetId: store.id,
-        detail: `${enabled ? '启用' : '停用'}门店 ${store.code} ${store.name} 的免登录链接`,
+        detail: {
+          summary: `${enabled ? '启用' : '停用'}门店 ${store.code} ${store.name} 的免登录链接`,
+          changes: [
+            { field: 'auto_login_enabled', from: store.auto_login_enabled ? '开启' : '关闭', to: enabled ? '开启' : '关闭' },
+          ],
+          note: enabled ? '免登录链接已恢复可用' : '已持有的免登录链接同时失效',
+        },
       });
       res.json({ ok: true, store: shapeStore(req, loadStore(store.id)) });
     }),
@@ -268,7 +295,11 @@ function createStoreRoutes({ db, audit }) {
         action: 'store_auto_login_rotate',
         targetType: 'store',
         targetId: store.id,
-        detail: `重置门店 ${store.code} ${store.name} 的免登录链接（旧链接立即失效）`,
+        detail: {
+          summary: `重置门店 ${store.code} ${store.name} 的免登录链接`,
+          context: { auto_login_enabled: store.auto_login_enabled ? '开启' : '关闭' },
+          note: '旧链接立即失效，需要重新分发二维码',
+        },
       });
       res.json({ ok: true, store: shapeStore(req, loadStore(store.id)) });
     }),
@@ -297,8 +328,8 @@ function createStoreRoutes({ db, audit }) {
         targetType: 'store',
         targetId: store.id,
         detail: ids.length
-          ? `门店 ${store.code} 关联 ${ids.length} 个商品`
-          : `门店 ${store.code} 取消商品关联，恢复为全部启用商品`,
+          ? { summary: `门店 ${store.code} 关联 ${ids.length} 个商品`, context: { product_ids: ids.join('、') } }
+          : { summary: `门店 ${store.code} 取消商品关联`, note: '恢复为全部启用商品' },
       });
       res.json({ ok: true, linkedCount: ids.length });
     }),

@@ -52,7 +52,7 @@ function submissionIndex(db, storeIds, from, to) {
   const marks = storeIds.map(() => '?').join(',');
   const rows = db
     .prepare(
-      `SELECT store_id, biz_date, period, item_count, total_qty, total_amount, submitted_at, submitter_name
+      `SELECT store_id, biz_date, period, item_count, total_qty, submitted_at, submitter_name
        FROM sale_submissions
        WHERE store_id IN (${marks}) AND biz_date BETWEEN ? AND ?`,
     )
@@ -216,7 +216,7 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
 
   const submissions = db
     .prepare(
-      `SELECT sub.store_id, sub.biz_date, sub.period, sub.item_count, sub.total_qty, sub.total_amount,
+      `SELECT sub.store_id, sub.biz_date, sub.period, sub.item_count, sub.total_qty,
               sub.submitted_at, sub.submitter_name
        FROM sale_submissions sub
        WHERE sub.biz_date BETWEEN ? AND ?`,
@@ -226,7 +226,7 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
 
   const entries = db
     .prepare(
-      `SELECT e.store_id, e.biz_date, e.period, e.qty, e.amount,
+      `SELECT e.store_id, e.biz_date, e.period, e.qty,
               p.name AS productName, p.barcode, p.alias
        FROM sale_entries e JOIN products p ON p.id = e.product_id
        WHERE e.biz_date BETWEEN ? AND ?`,
@@ -248,7 +248,6 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
           storeName: store.name,
           periods: {},
           totalQty: 0,
-          totalAmount: 0,
         });
       }
       const bucket = perStore.get(sub.store_id);
@@ -256,7 +255,6 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
         done: true,
         itemCount: sub.item_count,
         totalQty: sub.total_qty,
-        totalAmount: sub.total_amount,
         submittedAt: sub.submitted_at,
         submitter: sub.submitter_name,
         items: entries
@@ -266,11 +264,9 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
             alias: e.alias,
             barcode: e.barcode,
             qty: e.qty,
-            amount: e.amount,
           })),
       };
       bucket.totalQty += sub.total_qty;
-      bucket.totalAmount += Math.round(sub.total_amount * 100) / 100;
     }
     const storeRows = [...perStore.values()].sort((a, b) => a.storeCode.localeCompare(b.storeCode));
     const expected = allowed.size * PERIODS.length;
@@ -281,7 +277,6 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
       done,
       rate: percent(done, expected),
       totalQty: storeRows.reduce((s, r) => s + r.totalQty, 0),
-      totalAmount: Math.round(storeRows.reduce((s, r) => s + r.totalAmount, 0) * 100) / 100,
       stores: storeRows,
     };
   });
@@ -318,7 +313,7 @@ function detailRows(db, { storeIds, from, to, storeId, period }) {
     .prepare(
       `SELECT e.biz_date AS date, e.period, s.id AS storeId, s.code AS storeCode, s.name AS storeName,
               p.name AS productName, p.alias, p.barcode,
-              e.qty, e.amount, e.updated_at AS updatedAt,
+              e.qty, e.updated_at AS updatedAt,
               sub.submitted_at AS submittedAt, sub.submitter_name AS submitter
        FROM sale_entries e
        JOIN products p ON p.id = e.product_id
@@ -342,7 +337,6 @@ function detailRows(db, { storeIds, from, to, storeId, period }) {
       alias: r.alias,
       barcode: r.barcode || '',
       qty: r.qty,
-      amount: Math.round(r.amount * 100) / 100,
       submittedAt: r.submittedAt || '',
       submitter: r.submitter || '',
       updatedAt: r.updatedAt,
