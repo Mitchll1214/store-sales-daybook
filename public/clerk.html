@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>销售登记 · 店销日集</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'%3E集%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1 id="store-name">销售登记</h1>
+        <p id="store-sub">加载中…</p>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-sm btn-ghost" type="button" id="btn-help">说明</button>
+        <button class="btn btn-sm btn-ghost" type="button" id="btn-more" aria-label="更多">⋯</button>
+      </div>
+    </header>
+
+    <main class="app-main" id="view-home">
+      <section class="hero">
+        <p id="hello">你好</p>
+        <h2 id="hero-title">今日销售登记</h2>
+        <div class="store-line"><span id="hero-store"></span></div>
+      </section>
+
+      <div id="slots"></div>
+
+      <p class="wizard-tip" style="margin-top:22px">
+        每日需提交上午、下午两次数据；昨日数据可在当天 12:00 前补交。
+      </p>
+    </main>
+
+    <main class="app-main hidden" id="view-wizard"></main>
+  </div>
+
+  <div id="toast-host"></div>
+
+  <script src="/assets/common.js"></script>
+  <script src="/assets/clerk.js"></script>
+</body>
+</html>

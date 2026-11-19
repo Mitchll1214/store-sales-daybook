@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="format-detection" content="telephone=no">
+  <title>登录 · 店销日集</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'%3E集%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <main class="auth-shell">
+    <form class="auth-card" id="login-form" autocomplete="on" novalidate>
+      <div class="brand-mark">
+        <div class="brand-logo">集</div>
+        <div>
+          <h1 id="brand-name">店销日集</h1>
+          <p>门店销售日报收集与统计</p>
+        </div>
+      </div>
+
+      <div class="form-error hidden" id="form-error" role="alert"></div>
+
+      <div class="field">
+        <label for="username">账号</label>
+        <input class="input" id="username" name="username" type="text"
+               autocomplete="username" inputmode="text" placeholder="请输入账号" required
+               autocapitalize="none" spellcheck="false">
+      </div>
+
+      <div class="field">
+        <label for="password">密码</label>
+        <input class="input" id="password" name="password" type="password"
+               autocomplete="current-password" placeholder="请输入密码" required>
+      </div>
+
+      <button class="btn btn-block btn-lg" type="submit" id="submit-btn">登 录</button>
+
+      <p class="auth-foot">店员也可使用门店下发的专属链接直接进入</p>
+    </form>
+  </main>
+
+  <script src="/assets/common.js"></script>
+  <script src="/assets/login.js"></script>
+</body>
+</html>

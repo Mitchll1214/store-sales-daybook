@@ -1,0 +1,22 @@
+{
+  "name": "store-sales-daybook",
+  "version": "1.0.0",
+  "private": true,
+  "description": "店销日集 - 门店销售日报收集与统计系统",
+  "main": "server.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node --experimental-sqlite server.js",
+    "dev": "node --experimental-sqlite --watch server.js",
+    "test": "node --experimental-sqlite test/smoke.test.js",
+    "fetch:ipdb": "node scripts/fetch-ipdb.js --out vendor --fallback node_modules/ip2region/data"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ip2region": "^4.0.1",
+    "multer": "^2.5.0",
+    "qrcode": "^1.5.4"
+  }
+}

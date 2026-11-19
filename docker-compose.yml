@@ -1,0 +1,35 @@
+services:
+  daybook:
+    build: .
+    image: store-sales-daybook:latest
+    container_name: store-sales-daybook
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      # 生成免登录门店链接/二维码用的对外地址；留空则按请求 Host 推导
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-}"
+      APP_TZ_OFFSET: "${APP_TZ_OFFSET:-8}"
+      SESSION_DAYS: "${SESSION_DAYS:-14}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-0}"
+      INIT_ADMIN_USERNAME: "${INIT_ADMIN_USERNAME:-admin}"
+      INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
+      TZ: Asia/Shanghai
+    volumes:
+      # SQLite 数据库、上传图片、在线更新的 IP 库都在这里，务必持久化
+      - "${DATA_DIR:-./data}:/app/data"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

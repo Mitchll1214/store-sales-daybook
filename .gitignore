@@ -1,0 +1,18 @@
+# 依赖
+node_modules/
+
+# 运行时数据（SQLite、上传图片、在线更新的 IP 库、初始密码提示）
+data/
+
+# 镜像构建期下载的 IP 库（scripts/fetch-ipdb.js 生成）
+vendor/
+
+# 本地环境变量
+.env
+.env.*
+!.env.example
+
+# 日志与临时文件
+*.log
+.DS_Store
+Thumbs.db

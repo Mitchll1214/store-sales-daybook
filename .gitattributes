@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell 脚本必须保持 LF，否则容器内 /bin/sh 会因 CRLF 报错
+*.sh text eol=lf
+
+# 镜像配置文件保持 LF
+Dockerfile text eol=lf

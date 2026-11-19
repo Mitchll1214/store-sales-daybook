@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b2f2c">
+  <meta name="format-detection" content="telephone=no">
+  <title>管理后台 · 店销日集</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/admin.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'%3E集%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-logo">集</div>
+        <div>
+          <h1>店销日集</h1>
+          <p id="sidebar-role">管理后台</p>
+        </div>
+      </div>
+      <nav class="nav-group" id="nav"></nav>
+      <div class="sidebar-foot">
+        <div class="sidebar-user">
+          <b id="user-name">…</b>
+          <span id="user-scope"></span>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-sm" type="button" id="btn-password" style="flex:1">改密码</button>
+          <button class="btn btn-sm" type="button" id="btn-logout" style="flex:1">退出</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="admin-main">
+      <header class="admin-topbar">
+        <div>
+          <h2 id="page-title">概览</h2>
+          <p id="page-sub"></p>
+        </div>
+        <div class="spacer"></div>
+        <div id="topbar-actions" style="display:flex;gap:8px;align-items:center"></div>
+      </header>
+      <main class="admin-content">
+        <div class="content-max" id="view"></div>
+      </main>
+      <nav class="mobile-tabs" id="mobile-tabs"></nav>
+    </div>
+  </div>
+
+  <div id="toast-host"></div>
+
+  <script src="/assets/common.js"></script>
+  <script src="/assets/admin/core.js"></script>
+  <script src="/assets/admin/dashboard.js"></script>
+  <script src="/assets/admin/reports.js"></script>
+  <script src="/assets/admin/stores.js"></script>
+  <script src="/assets/admin/catalog.js"></script>
+  <script src="/assets/admin/users.js"></script>
+  <script src="/assets/admin/logs.js"></script>
+  <script src="/assets/admin/boot.js"></script>
+</body>
+</html>

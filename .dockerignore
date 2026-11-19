@@ -1,0 +1,18 @@
+# 依赖与构建产物（镜像内重新安装）
+node_modules/
+vendor/
+
+# 运行时数据（数据库、上传图片、在线更新的 IP 库、初始密码提示）
+data/
+
+# 版本库与本地配置
+.git/
+.gitattributes
+.env
+.env.*
+
+# 测试与临时文件
+test/
+*.log
+.DS_Store
+Thumbs.db
