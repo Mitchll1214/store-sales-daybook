@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="368" viewBox="0 0 1200 368" role="img" aria-labelledby="flowTitle flowDesc">
+  <title id="flowTitle">店销日集数据流向：店员手机填报 → 服务端校验落库 → 完成率与柱形图 → 报表与审计</title>
+  <desc id="flowDesc">四个阶段横向排列：店员用免登录链接或扫码进入，按上午下午两次填报；服务端校验时段后在 SQLite 事务中写入并保存凭证图；统计按区域管理员分组输出完成率与本品竞品柱形图；最终产出 CSV 区间明细与带 IP 归属地、设备指纹的操作日志。</desc>
+
+  <style>
+    .frame { fill: #f7f9fa; stroke: #e2e8f0; stroke-width: 1; }
+    .card { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
+    .chip { fill: #ccfbf1; }
+    .stepLabel { fill: #115e59; font: 600 20px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.04em; }
+    .title { fill: #0f172a; font: 600 24px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif; }
+    .desc { fill: #64748b; font: 400 20px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif; }
+    .note { fill: #64748b; font: 400 20px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif; }
+    .noteCode { fill: #475569; font: 500 20px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .arrowLine { stroke: #cbd5e1; stroke-width: 2; }
+    .arrowHead { fill: #cbd5e1; }
+
+    .brandStroke { stroke: #0f766e; stroke-width: 1.8; fill: #f0fdfa; }
+    .softStroke { stroke: #cbd5e1; stroke-width: 1.6; fill: #ffffff; }
+    .pillOn { fill: #ccfbf1; stroke: #5eead4; stroke-width: 1; }
+    .pillOff { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
+    .pillText { fill: #115e59; font: 500 20px/1 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .barOwn { fill: #0f766e; }
+    .barComp { fill: #cbd5e1; }
+    .axis { stroke: #e2e8f0; stroke-width: 1.6; }
+    .rowLine { stroke: #dbe3ec; stroke-width: 1.4; }
+  </style>
+
+  <rect class="frame" x="0.5" y="0.5" width="1199" height="367" rx="18" />
+
+  <!-- 01 填报端 -->
+  <rect class="card" x="36" y="32" width="256" height="272" rx="14" />
+  <rect class="chip" x="58" y="52" width="120" height="30" rx="9" />
+  <text class="stepLabel" x="70" y="74">01 填报端</text>
+  <text class="title" x="58" y="118">店员手机填报</text>
+  <text class="desc" x="58" y="154">扫码或免登录链接</text>
+  <text class="desc" x="58" y="182">上午 / 下午各一次</text>
+
+  <rect class="softStroke" x="58" y="200" width="46" height="86" rx="8" />
+  <rect class="brandStroke" x="65" y="210" width="32" height="8" rx="4" />
+  <rect class="softStroke" x="65" y="224" width="32" height="8" rx="4" />
+  <rect class="softStroke" x="65" y="238" width="32" height="8" rx="4" />
+  <circle cx="81" cy="268" r="5" fill="#e2e8f0" />
+
+  <rect class="pillOn" x="118" y="204" width="82" height="30" rx="15" />
+  <text class="pillText" x="159" y="225" text-anchor="middle">上午</text>
+  <rect class="pillOff" x="118" y="244" width="82" height="30" rx="15" />
+  <text class="pillText" x="159" y="265" text-anchor="middle">下午</text>
+
+  <path class="arrowLine" d="M296 168 H313" />
+  <path class="arrowHead" d="M313 161 L325 168 L313 175 Z" />
+
+  <!-- 02 服务端 -->
+  <rect class="card" x="328" y="32" width="256" height="272" rx="14" />
+  <rect class="chip" x="350" y="52" width="110" height="30" rx="9" />
+  <text class="stepLabel" x="362" y="74">02 服务端</text>
+  <text class="title" x="350" y="118">校验后落库</text>
+  <text class="desc" x="350" y="154">过期自动锁定</text>
+  <text class="desc" x="350" y="182">事务写入 + 凭证</text>
+
+  <path class="brandStroke" d="M356 212 v40 a26 9 0 0 0 52 0 v-40" />
+  <ellipse class="brandStroke" cx="382" cy="212" rx="26" ry="9" />
+  <path class="axis" d="M356 228 a26 9 0 0 0 52 0" />
+  <path class="axis" d="M356 244 a26 9 0 0 0 52 0" />
+
+  <rect class="softStroke" x="424" y="206" width="136" height="76" rx="9" />
+  <text class="noteCode" x="440" y="232" style="font-size:19px">sale_entries</text>
+  <path class="rowLine" d="M424 244 H560" />
+  <text class="noteCode" x="440" y="268" style="font-size:19px">uploads/</text>
+
+  <path class="arrowLine" d="M588 168 H605" />
+  <path class="arrowHead" d="M605 161 L617 168 L605 175 Z" />
+
+  <!-- 03 统计 -->
+  <rect class="card" x="620" y="32" width="256" height="272" rx="14" />
+  <rect class="chip" x="642" y="52" width="110" height="30" rx="9" />
+  <text class="stepLabel" x="654" y="74">03 统计</text>
+  <text class="title" x="642" y="118">完成率与柱形图</text>
+  <text class="desc" x="642" y="154">按管理员分组</text>
+  <text class="desc" x="642" y="182">本品竞品并排</text>
+
+  <path class="axis" d="M642 282 H830" />
+  <rect class="barOwn" x="650" y="240" width="30" height="42" rx="4" />
+  <rect class="barComp" x="694" y="220" width="30" height="62" rx="4" />
+  <rect class="barOwn" x="738" y="252" width="30" height="30" rx="4" />
+  <rect class="barComp" x="782" y="232" width="30" height="50" rx="4" />
+  <text class="note" x="650" y="216" style="font-size:19px">销量合计 · 未提交计 0</text>
+
+  <path class="arrowLine" d="M880 168 H897" />
+  <path class="arrowHead" d="M897 161 L909 168 L897 175 Z" />
+
+  <!-- 04 输出 -->
+  <rect class="card" x="912" y="32" width="252" height="272" rx="14" />
+  <rect class="chip" x="934" y="52" width="110" height="30" rx="9" />
+  <text class="stepLabel" x="946" y="74">04 输出</text>
+  <text class="title" x="934" y="118">报表与审计</text>
+  <text class="desc" x="934" y="154">区间明细 CSV</text>
+  <text class="desc" x="934" y="182">日志含 IP 指纹</text>
+
+  <rect class="softStroke" x="934" y="206" width="150" height="76" rx="9" />
+  <path class="rowLine" d="M934 232 H1084" />
+  <path class="rowLine" d="M972 206 V282" />
+  <path class="rowLine" d="M1020 232 V282" />
+  <path class="rowLine" d="M1060 232 V282" />
+  <text class="noteCode" x="944" y="225" style="font-size:18px">date · store</text>
+  <text class="noteCode" x="944" y="254" style="font-size:18px">11-19</text>
+  <text class="noteCode" x="980" y="254" style="font-size:18px">S001</text>
+  <text class="noteCode" x="944" y="276" style="font-size:18px">406</text>
+
+  <!-- 脚注 -->
+  <text class="note" x="36" y="342">单容器部署</text>
+  <text class="noteCode" x="128" y="342">docker compose up -d --build</text>
+  <text class="note" x="432" y="342">·</text>
+  <text class="note" x="454" y="342">数据落在</text>
+  <text class="noteCode" x="546" y="342">data/app.db</text>
+  <text class="note" x="672" y="342">，无需外部数据库</text>
+</svg>

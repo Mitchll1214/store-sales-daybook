@@ -113,8 +113,23 @@ function createProductRoutes({ db, audit }) {
         .prepare("SELECT DISTINCT category FROM products WHERE category <> '' ORDER BY category")
         .all()
         .map((r) => r.category);
+      // 删除前的「影响面」：两个表各扫一遍聚合成 map，避免逐行查询。
+      // 前端据此在确认框里说清会连带删除多少明细与门店关联。
+      const tally = (sql) =>
+        db
+          .prepare(sql)
+          .all()
+          .reduce((acc, r) => {
+            acc[r.product_id] = r.c;
+            return acc;
+          }, {});
+      const salesMap = tally('SELECT product_id, count(*) AS c FROM sale_entries GROUP BY product_id');
+      const storeMap = tally('SELECT product_id, count(*) AS c FROM store_products GROUP BY product_id');
       res.json({
-        rows: rows.map(shape),
+        rows: rows.map((p) => ({
+          ...shape(p),
+          usage: { sales: salesMap[p.id] || 0, stores: storeMap[p.id] || 0 },
+        })),
         counts: { active: counts.active || 0, disabled: counts.disabled || 0 },
         categories,
         kinds: KINDS.map((value) => ({ value, label: KIND_LABEL[value] })),
@@ -260,34 +275,47 @@ function createProductRoutes({ db, audit }) {
     }),
   );
 
-  /** 删除商品（历史数据保留：仅解绑关联并删除档案会破坏统计，故仅允许无历史数据的商品） */
+  /**
+   * 删除商品（总部管理员强制删除）。
+   *
+   * 选择「强制删除」而不是阻止：现实里录错的商品、临时试卖的商品都需要清掉。
+   * 因此连带删除该商品的销售明细与门店关联，并用一个事务保证不留半截数据；
+   * 影响面（删除多少条明细、多少家门店关联）同时写进操作日志，
+   * 事后能查清某天某商品的统计口径为什么变了。
+   */
   router.delete(
     '/:id',
     requireRole('admin'),
     asyncHandler(async (req, res) => {
       const product = db.prepare('SELECT * FROM products WHERE id = ?').get(Number(req.params.id));
       if (!product) throw new HttpError(404, '商品不存在');
-      const used = db.prepare('SELECT count(*) AS c FROM sale_entries WHERE product_id = ?').get(product.id).c;
-      if (used > 0) {
-        return res.status(409).json({ error: '该商品已有销售记录，不能删除；请改为“禁用”' });
-      }
-      db.prepare('DELETE FROM products WHERE id = ?').run(product.id);
+      let sales = 0;
+      let stores = 0;
+      db.transaction(() => {
+        sales = db.prepare('DELETE FROM sale_entries WHERE product_id = ?').run(product.id).changes || 0;
+        stores = db.prepare('DELETE FROM store_products WHERE product_id = ?').run(product.id).changes || 0;
+        db.prepare('DELETE FROM products WHERE id = ?').run(product.id);
+      })();
       audit.log(req, {
         action: 'product_delete',
         targetType: 'product',
         targetId: product.id,
         detail: {
-          summary: `删除商品 ${product.name}`,
+          summary: `删除商品 ${product.name}（连带销售明细 ${sales} 条、门店关联 ${stores} 条）`,
           context: {
             alias: product.alias,
             barcode: product.barcode || null,
             category: product.category || null,
             kind: KIND_LABEL[normalizeKind(product.kind)],
+            status: product.status,
           },
-          note: '已确认该商品没有销售记录',
+          note:
+            sales || stores
+              ? '该商品的历史销售数据已一并删除，相关报表口径随之变化'
+              : '该商品没有销售记录与门店关联',
         },
       });
-      res.json({ ok: true });
+      res.json({ ok: true, removed: { sales, stores } });
     }),
   );
 

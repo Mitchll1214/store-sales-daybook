@@ -33,6 +33,41 @@ function createLogRoutes({ db, audit, ipdb }) {
     }),
   );
 
+  /**
+   * 勾选删除日志（总部管理员）。
+   *
+   * 日志是审计证据，删除必须留痕：先取被删记录的摘要，删完后把这些摘要
+   * 连同「谁删的、删了几条」一起写成一条新的 log_delete 记录。
+   */
+  router.post(
+    '/delete',
+    asyncHandler(async (req, res) => {
+      const raw = req.body && req.body.ids;
+      if (!Array.isArray(raw) || raw.length === 0) {
+        return res.status(400).json({ error: '请先勾选要删除的操作记录' });
+      }
+      const result = audit.remove(raw);
+      if (!result.deleted) return res.status(404).json({ error: '所选记录已不存在，请刷新后重试' });
+      const sample = result.rows
+        .slice(0, 10)
+        .map((r) => `#${r.id} ${r.action} ${r.actor_username || r.actor_name || 'system'} ${r.created_at}`)
+        .join('；');
+      audit.log(req, {
+        action: 'log_delete',
+        targetType: 'audit_log',
+        detail: {
+          summary: `删除操作日志 ${result.deleted} 条`,
+          context: {
+            ids: result.rows.map((r) => r.id).join('、').slice(0, 400),
+            actions: [...new Set(result.rows.map((r) => r.action))].join('、'),
+          },
+          note: `${sample}${result.rows.length > 10 ? `；等共 ${result.rows.length} 条` : ''}`,
+        },
+      });
+      res.json({ ok: true, deleted: result.deleted });
+    }),
+  );
+
   /** 校验上游是否需要更新（只读） */
   router.post(
     '/ipdb/check',

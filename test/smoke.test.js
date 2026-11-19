@@ -554,6 +554,71 @@ async function main() {
     const r = await call('GET', '/api/logs', undefined, { session: multi });
     assert.strictEqual(r.status, 403);
   });
+  await check('删除商品连带清理销售明细与门店关联', async () => {
+    // 用临时商品验证强制删除：先录一条明细 + 绑一家门店，删完三张表都不许留残余
+    const p = await call('POST', '/api/products', {
+      name: '临时试卖品',
+      alias: '临时',
+      category: '测试',
+      kind: 'own',
+    }, { session: admin });
+    assert.strictEqual(p.status, 201, JSON.stringify(p.data));
+    const id = p.data.product.id;
+    const list = await call('GET', '/api/stores', undefined, { session: admin });
+    const s1 = list.data.rows.find((s) => s.code === 'S001');
+    const link = await call('PUT', `/api/stores/${s1.id}/products`, { productIds: [id] }, { session: admin });
+    assert.strictEqual(link.status, 200, JSON.stringify(link.data));
+    db.prepare(
+      `INSERT INTO sale_entries (store_id, biz_date, period, product_id, qty, amount, updated_by, updated_at)
+       VALUES (?, ?, 'am', ?, 2, 0, NULL, ?)`,
+    ).run(s1.id, today, id, `${today} 09:00:00`);
+
+    // 列表要能给出影响面，前端确认框据此措辞
+    const withUsage = await call('GET', '/api/products', undefined, { session: admin });
+    const row = withUsage.data.rows.find((x) => x.id === id);
+    assert.deepStrictEqual(row.usage, { sales: 1, stores: 1 }, JSON.stringify(row.usage));
+
+    const del = await call('DELETE', `/api/products/${id}`, undefined, { session: admin });
+    assert.strictEqual(del.status, 200, JSON.stringify(del.data));
+    assert.deepStrictEqual(del.data.removed, { sales: 1, stores: 1 });
+    assert.strictEqual(db.prepare('SELECT count(*) AS c FROM products WHERE id = ?').get(id).c, 0);
+    assert.strictEqual(db.prepare('SELECT count(*) AS c FROM sale_entries WHERE product_id = ?').get(id).c, 0);
+    assert.strictEqual(db.prepare('SELECT count(*) AS c FROM store_products WHERE product_id = ?').get(id).c, 0);
+    const log = db
+      .prepare("SELECT detail FROM audit_logs WHERE action = 'product_delete' AND target_id = ?")
+      .get(String(id));
+    assert.ok(log, '缺少 product_delete 审计');
+    assert.ok(log.detail.includes('连带销售明细 1 条'), log.detail);
+
+    // 恢复门店关联为空（等于全部启用商品），不影响后续用例
+    await call('PUT', `/api/stores/${s1.id}/products`, { productIds: [] }, { session: admin });
+  });
+  await check('勾选删除操作日志并留下删除审计', async () => {
+    const before = await call('GET', '/api/logs?pageSize=200', undefined, { session: admin });
+    assert.strictEqual(before.status, 200, JSON.stringify(before.data));
+    // login 记录留给后续指纹用例；这里挑 product_create 这类与其它断言无关的记录
+    const targets = before.data.rows.filter((x) => x.action === 'product_create').slice(0, 2).map((x) => x.id);
+    assert.ok(targets.length >= 1, '缺少可删除的商品日志');
+    const r = await call('POST', '/api/logs/delete', { ids: targets }, { session: admin });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+    assert.strictEqual(r.data.deleted, targets.length);
+    const after = await call('GET', '/api/logs?pageSize=200', undefined, { session: admin });
+    const ids = new Set(after.data.rows.map((x) => x.id));
+    for (const id of targets) assert.ok(!ids.has(id), `日志 ${id} 未被删除`);
+    const audit = after.data.rows.find((x) => x.action === 'log_delete');
+    assert.ok(audit, '缺少 log_delete 审计');
+    assert.ok(audit.detail.includes(`删除操作日志 ${targets.length} 条`), audit.detail);
+  });
+  await check('日志删除拒绝空选择与不存在的记录', async () => {
+    const empty = await call('POST', '/api/logs/delete', { ids: [] }, { session: admin });
+    assert.strictEqual(empty.status, 400);
+    const gone = await call('POST', '/api/logs/delete', { ids: [99999999] }, { session: admin });
+    assert.strictEqual(gone.status, 404);
+  });
+  await check('区域管理员无权删除操作日志', async () => {
+    const r = await call('POST', '/api/logs/delete', { ids: [1] }, { session: multi });
+    assert.strictEqual(r.status, 403);
+  });
 
   console.log('\n[7] 设备指纹稳定性');
   await check('切换网络类型 UA 后指纹不变', async () => {

@@ -55,6 +55,9 @@ const VALUES_LABEL = {
   CLERK: '店员',
 };
 
+/** 一次最多删除多少条日志：与分页上限一致，避免一次请求拼出超长 SQL */
+const MAX_DELETE = 200;
+
 /** 把内部值渲染成可读文本：空值、布尔、null 都要能看懂 */
 function showValue(v) {
   if (v === null || v === undefined || v === '') return '空';
@@ -160,8 +163,7 @@ class Audit {
    * 分页查询。单个关键字在「操作人账号 / 姓名 / 详情 / IP / 归属地 / 设备指纹」里模糊匹配，
    * 这样页面上只留一个搜索框就够用。
    */
-  query({ q, action, from, to, page = 1, pageSize = 30 }) {
-    const where = [];
+  query({ q, action, from, to, page = 1, pageSize = 30 }) {    const where = [];
     const params = [];
     if (q) {
       where.push(
@@ -222,6 +224,33 @@ class Audit {
     return this.db
       .prepare('SELECT action, count(*) AS c FROM audit_logs GROUP BY action ORDER BY c DESC')
       .all();
+  }
+
+  /**
+   * 批量删除日志（总部管理员勾选删除）。
+   *
+   * 删除本身会再写一条审计，因此「谁在什么时候清掉了哪批日志」始终留痕；
+   * 被删记录的动作 / 操作人 / 时间会摘进这条审计的备注里，
+   * 否则删完就只剩「删了 N 条」这一句，等于自己也断了线索。
+   */
+  remove(ids) {
+    const list = [
+      ...new Set(
+        (Array.isArray(ids) ? ids : [])
+          .map((v) => Number(v))
+          .filter((n) => Number.isInteger(n) && n > 0),
+      ),
+    ].slice(0, MAX_DELETE);
+    if (!list.length) return { deleted: 0, rows: [] };
+    const marks = list.map(() => '?').join(',');
+    const rows = this.db
+      .prepare(`SELECT id, action, actor_name, actor_username, created_at FROM audit_logs WHERE id IN (${marks})`)
+      .all(...list);
+    if (!rows.length) return { deleted: 0, rows: [] };
+    const info = this.db
+      .prepare(`DELETE FROM audit_logs WHERE id IN (${rows.map(() => '?').join(',')})`)
+      .run(...rows.map((r) => r.id));
+    return { deleted: info.changes || 0, rows };
   }
 }
 

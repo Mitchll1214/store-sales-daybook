@@ -35,6 +35,7 @@
     product_batch_create: '批量导入商品',
     product_update: '修改商品',
     product_delete: '删除商品',
+    log_delete: '删除操作日志',
     sales_submit: '提交销售数据',
     sales_fill_zero: '批量记 0',
     image_upload: '上传凭证图片',
@@ -48,6 +49,7 @@
   const DANGER_ACTIONS = new Set([
     'user_delete',
     'product_delete',
+    'log_delete',
     'image_delete',
     'login_failed',
     'login_blocked',
@@ -67,6 +69,8 @@
     actions: [],
     mode: 'location', // location | device
     ipdb: null,
+    // 勾选只对当前页有效：翻页、改筛选、刷新都会清空，避免「以为还在选」地误删
+    selected: new Set(),
   };
 
   function actionLabel(action) {
@@ -148,10 +152,16 @@
         ? `<th class="sortable" data-toggle-mode title="点击切换为 IP 与设备指纹">IP 归属地 ⇄</th>`
         : `<th class="sortable" data-toggle-mode title="点击切换为 IP 归属地">IP / 设备指纹 ⇄</th>`;
 
+    const picked = state.selected.size;
+    const allPicked = data.rows.length > 0 && data.rows.every((r) => state.selected.has(r.id));
+
     const rows = data.rows.length
       ? data.rows
           .map(
-            (r) => `<tr>
+            (r) => `<tr class="${state.selected.has(r.id) ? 'picked' : ''}">
+              <td class="pick-cell"><input type="checkbox" data-pick="${r.id}" ${
+                state.selected.has(r.id) ? 'checked' : ''
+              } aria-label="选择该条记录"></td>
               <td class="tiny mono">${escapeHtml((r.created_at || '').slice(5, 19))}</td>
               <td class="actor-cell">${actorCell(r)}</td>
               <td>${actionTag(r.action)}</td>
@@ -160,17 +170,24 @@
             </tr>`,
           )
           .join('')
-      : `<tr><td colspan="5" class="empty">该时间范围内没有操作记录</td></tr>`;
+      : `<tr><td colspan="6" class="empty">该时间范围内没有操作记录</td></tr>`;
 
     return `<div class="panel">
       <div class="panel-head">
-        <div><h3>操作记录</h3><p>共 ${data.total} 条 · 第 ${data.page} / ${data.pages} 页</p></div>
+        <div><h3>操作记录</h3><p>共 ${data.total} 条 · 第 ${data.page} / ${data.pages} 页${
+          picked ? ` · 已选 ${picked} 条` : ''
+        }</p></div>
         <div class="spacer" style="flex:1"></div>
+        <button class="btn btn-sm btn-danger" type="button" id="lg-delete" ${picked ? '' : 'disabled'}>删除所选${
+          picked ? `（${picked}）` : ''
+        }</button>
         <button class="btn btn-sm btn-ghost" type="button" id="lg-refresh">刷新</button>
       </div>
       <div class="panel-body flush">
-        <div class="table-wrap"><table class="data">
+        <div class="table-wrap"><table class="data log-table">
           <thead><tr>
+            <th class="pick-cell"><input type="checkbox" data-pick-all ${allPicked ? 'checked' : ''}
+              aria-label="全选本页" ${data.rows.length ? '' : 'disabled'}></th>
             <th>时间</th><th>操作人</th><th>动作</th><th>详情</th>${sourceHead}
           </tr></thead>
           <tbody>${rows}</tbody>
@@ -268,7 +285,14 @@
   }
 
   async function loadLogs() {
-    const data = await api.get(`/api/logs?${query()}`);
+    // 选中状态只属于当前这一屏：翻页、筛选、刷新后一律清空
+    state.selected.clear();
+    let data = await api.get(`/api/logs?${query()}`);
+    // 把当前页删空了就退回最后一页，不要停在空白页上
+    if (data.rows.length === 0 && data.total > 0 && data.page > data.pages) {
+      state.page = data.pages;
+      data = await api.get(`/api/logs?${query()}`);
+    }
     state.data = data;
     state.actions = data.actions || [];
   }
@@ -319,6 +343,76 @@
 
     const refreshBtn = $('#lg-refresh');
     if (refreshBtn) refreshBtn.addEventListener('click', refresh);
+
+    // 勾选状态即时反馈：只改按钮与行高亮，不重渲染表格（避免丢失展开的详情与滚动位置）
+    const deleteBtn = $('#lg-delete');
+    const syncPicked = () => {
+      const picked = state.selected.size;
+      if (deleteBtn) {
+        deleteBtn.disabled = picked === 0;
+        deleteBtn.textContent = picked ? `删除所选（${picked}）` : '删除所选';
+      }
+      const all = $('[data-pick-all]');
+      const rows = state.data ? state.data.rows : [];
+      if (all) all.checked = rows.length > 0 && rows.every((r) => state.selected.has(r.id));
+      $$('[data-pick]').forEach((box) => {
+        const tr = box.closest('tr');
+        if (tr) tr.classList.toggle('picked', box.checked);
+      });
+      if (state.data) {
+        const p = $('.panel-head p');
+        if (p) {
+          const base = `共 ${state.data.total} 条 · 第 ${state.data.page} / ${state.data.pages} 页`;
+          p.textContent = picked ? `${base} · 已选 ${picked} 条` : base;
+        }
+      }
+    };
+
+    $$('[data-pick]').forEach((box) => {
+      box.addEventListener('change', () => {
+        const id = Number(box.dataset.pick);
+        if (box.checked) state.selected.add(id);
+        else state.selected.delete(id);
+        syncPicked();
+      });
+    });
+
+    const allBox = $('[data-pick-all]');
+    if (allBox) {
+      allBox.addEventListener('change', () => {
+        const rows = state.data ? state.data.rows : [];
+        state.selected.clear();
+        if (allBox.checked) rows.forEach((r) => state.selected.add(r.id));
+        $$('[data-pick]').forEach((box) => {
+          box.checked = allBox.checked;
+        });
+        syncPicked();
+      });
+    }
+
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        const ids = [...state.selected];
+        if (!ids.length) return;
+        const ok = await window.SSD.confirmDialog({
+          title: '删除操作记录',
+          message: `确定删除所选的 ${ids.length} 条操作记录吗？该操作不可恢复，删除动作本身会写入一条新的操作日志。`,
+          okText: '删除',
+          danger: true,
+        });
+        if (!ok) return;
+        deleteBtn.disabled = true;
+        try {
+          const result = await api.post('/api/logs/delete', { ids });
+          toast(`已删除 ${result.deleted} 条操作记录`, 'ok');
+          state.selected.clear();
+          await refresh();
+        } catch (err) {
+          toast(err.message || '删除失败', 'err');
+          deleteBtn.disabled = false;
+        }
+      });
+    }
 
     // 详情展开/收起：就地切换，不重渲染，避免翻页状态与滚动位置丢失
     $$('[data-detail-toggle]').forEach((btn) => {

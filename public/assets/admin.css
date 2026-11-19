@@ -1448,6 +1448,33 @@ table.heat td.tap:hover {
   color: var(--ok);
 }
 
+/* ---------- 日志勾选删除 ---------- */
+
+/* 勾选列：width:1% 是表格自动布局里「收缩到内容宽」的写法，
+   否则剩余空间会被摊到这一列上，勾选框两侧留出一大片空白 */
+table.data.log-table th.pick-cell,
+table.data.log-table td.pick-cell {
+  width: 1%;
+  padding-right: 4px;
+  text-align: center;
+}
+
+table.data.log-table .pick-cell input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+table.data.log-table tbody tr.picked {
+  background: var(--brand-ghost);
+}
+
+table.data.log-table tbody tr.picked:hover {
+  background: #e6fbf5;
+}
+
 /* ---------- 商品勾选 ---------- */
 
 .product-picker {

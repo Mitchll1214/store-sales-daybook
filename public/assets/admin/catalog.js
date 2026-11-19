@@ -77,7 +77,8 @@
                   ? `<button class="btn btn-sm btn-ghost" type="button" data-act="edit">编辑</button>
                      <button class="btn btn-sm btn-ghost" type="button" data-act="toggle">${
                        p.status === 'active' ? '禁用' : '启用'
-                     }</button>`
+                     }</button>
+                     <button class="btn btn-sm btn-danger" type="button" data-act="del">删除</button>`
                   : '<span class="tiny muted">只读</span>'
               }</td>
             </tr>`,
@@ -251,6 +252,36 @@
       };
       const editBtn = $('[data-act="edit"]', tr);
       if (editBtn) editBtn.addEventListener('click', () => openProductDialog(product, refresh));
+      const delBtn = $('[data-act="del"]', tr);
+      if (delBtn) {
+        delBtn.addEventListener('click', async () => {
+          const { sales, stores } = product.usage || { sales: 0, stores: 0 };
+          // 强制删除会抹掉历史统计，确认框必须把「删掉多少条明细、多少家门店关联」说清楚
+          const impact = sales || stores
+            ? `该商品已有销售明细 ${sales} 条、门店关联 ${stores} 条，删除后这些数据一并清除，相关报表口径随之变化。`
+            : '该商品暂无销售记录与门店关联，删除后仅移除档案。';
+          const ok = await confirmDialog({
+            title: '删除商品',
+            message: `确定删除「${product.name}」吗？${impact}该操作不可恢复（操作日志会保留）。`,
+            okText: '删除',
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            const res = await api.del(`/api/products/${product.id}`);
+            const removed = res && res.removed;
+            toast(
+              removed && (removed.sales || removed.stores)
+                ? `商品已删除，连带清除明细 ${removed.sales} 条、门店关联 ${removed.stores} 条`
+                : '商品已删除',
+              'ok',
+            );
+            await refresh();
+          } catch (err) {
+            toast(err.message || '删除失败', 'err');
+          }
+        });
+      }
       const toggleBtn = $('[data-act="toggle"]', tr);
       if (toggleBtn) {
         toggleBtn.addEventListener('click', async () => {
