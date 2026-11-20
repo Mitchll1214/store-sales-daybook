@@ -26,7 +26,10 @@
     },
     {
       group: '系统',
-      items: [{ id: 'logs', label: '操作日志', ico: 'logs', roles: ['admin'] }],
+      items: [
+        { id: 'logs', label: '操作日志', ico: 'logs', roles: ['admin'] },
+        { id: 'settings', label: '系统设置', ico: 'settings', roles: ['admin'] },
+      ],
     },
   ];
 
@@ -141,6 +144,8 @@
     state.params = params || {};
 
     markActive(id);
+    // 每次切页都顺手接一下 IP 库任务：任务可能在别的标签页发起，本页也要能看到进度胶囊
+    ipdbFeed.refresh();
     $('#page-title').textContent = typeof mod.title === 'function' ? mod.title(params) : mod.title || (meta && meta.label) || '';
     $('#page-sub').textContent = typeof mod.subtitle === 'function' ? mod.subtitle(params) : mod.subtitle || '';
     $('#topbar-actions').innerHTML = '';
@@ -259,8 +264,135 @@
     copy: copyText,
   };
 
-  /* ---------------- 启动 ---------------- */
+  /* ---------------- IP 库后台任务 ---------------- */
 
+  /**
+   * IP 库更新是纯后台任务：状态存在服务端 ipdb 实例上，因此
+   * - 用户点完「开始更新」就能切页面、甚至刷新浏览器，回来仍接得上同一次下载；
+   * - 前端这里只轮询进度，并在顶栏显示「更新中 42%」，不阻塞任何操作。
+   */
+  const ipdbFeed = {
+    job: null,
+    status: null,
+    listeners: new Set(),
+    timer: null,
+    polling: false,
+    denied: false,
+    announced: null,
+    /** 上次成功轮询的时间戳，供 refresh() 节流 */
+    lastPollAt: 0,
+
+    snapshot() {
+      return { job: this.job, status: this.status };
+    },
+
+    /** 订阅任务变化，返回取消订阅函数（页面离开前调用，避免重复订阅） */
+    watch(fn) {
+      this.listeners.add(fn);
+      try {
+        fn(this.snapshot());
+      } catch {
+        /* 首次同步失败不影响后续轮询 */
+      }
+      return () => this.listeners.delete(fn);
+    },
+
+    emit() {
+      const snap = this.snapshot();
+      this.listeners.forEach((fn) => {
+        try {
+          fn(snap);
+        } catch {
+          /* 单个订阅者出错不应打断轮询 */
+        }
+      });
+      paintChip();
+    },
+
+    /** 百分比（无 total 时为 null），供胶囊与面板共用 */
+    percent(job) {
+      const p = (job || this.job || {}).progress;
+      return p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : null;
+    },
+
+    async poll() {
+      if (this.polling || this.denied) return;
+      this.polling = true;
+      this.lastPollAt = Date.now();
+      try {
+        const data = await api.get('/api/logs/ipdb/job');
+        const before = this.job;
+        this.job = data.job || null;
+        this.status = data.status || null;
+        this.emit();
+        if (this.job && this.job.running) this.schedule();
+        // 只提示「本次会话观察到从跑到不跑」的任务，避免每次进页面都弹旧结果
+        else if (before && before.running) announce(this.job);
+      } catch (err) {
+        // 区域管理员没有操作日志权限（403），不必反复重试
+        if (err && err.status === 403) this.denied = true;
+      } finally {
+        this.polling = false;
+      }
+    },
+
+    schedule(delay = 1500) {
+      if (this.timer || this.denied) return;
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.poll();
+      }, delay);
+    },
+
+    /**
+     * 接上可能正在跑的任务。
+     * 每次切页面都会调用：任务可能是在另一个标签页发起的，也可能是本页刷新前发起的，
+     * 前端不应依赖「本页点过按钮」才知道要有进度条。这里加节流，避免频繁切页刷接口。
+     */
+    refresh() {
+      if (this.denied) return Promise.resolve(null);
+      const now = Date.now();
+      if (this.lastPollAt && now - this.lastPollAt < 3000) return Promise.resolve(null);
+      return this.poll();
+    },
+
+    /** 刚发起更新：立刻轮询并进入高频跟进 */
+    begin() {
+      this.announced = null;
+      this.lastPollAt = 0;
+      return this.poll();
+    },
+  };
+
+  /** 任务结束的一次性提示：无论在哪个页面，结果都要让用户看到 */
+  function announce(job) {
+    if (!job || !job.id || ipdbFeed.announced === job.id) return;
+    ipdbFeed.announced = job.id;
+    if (job.stage === 'done') {
+      const via = job.result && job.result.via && job.result.via.label ? `，来源 ${job.result.via.label}` : '';
+      toast(`IP 库已更新完成${via}，详情见操作日志`, 'ok');
+    } else if (job.stage === 'failed') {
+      toast(`IP 库更新失败：${job.error || '未知错误'}，详情见操作日志`, 'err');
+    }
+  }
+
+  /** 顶栏进度胶囊：只在有任务在跑时出现，点击跳到系统设置的 IP 库面板看进度 */
+  function paintChip() {
+    const chip = $('#ipdb-chip');
+    if (!chip) return;
+    const job = ipdbFeed.job;
+    if (job && job.running) {
+      const pct = ipdbFeed.percent(job);
+      chip.hidden = false;
+      // 胶囊很短：有百分比就给「更新中 42%」，没有就只给「更新中」
+      chip.textContent = pct == null ? 'IP 库更新中' : `IP 库更新中 ${pct}%`;
+      chip.title = `${job.stageText || '更新中'} · 点击查看进度`;
+    } else {
+      chip.hidden = true;
+    }
+  }
+
+  /* ---------------- 启动 ---------------- */
   async function start() {
     let me;
     try {
@@ -285,11 +417,23 @@
 
     renderNav();
     window.addEventListener('hashchange', route);
-    $('#btn-logout').addEventListener('click', () => {
+    // 侧边栏底部与手机端顶栏各有一个退出入口，走同一段确认逻辑
+    const doLogout = () => {
       SSD.confirmDialog({ title: '退出登录', message: '确定要退出当前账号吗？', okText: '退出' }).then((ok) => {
         if (ok) SSD.logout();
       });
+    };
+    ['#btn-logout', '#btn-logout-mobile'].forEach((sel) => {
+      const el = $(sel);
+      if (el) el.addEventListener('click', doLogout);
     });
+    // 顶栏进度胶囊：点一下跳到系统设置，IP 库面板在那里，完整结果在操作日志里留痕
+    const chip = $('#ipdb-chip');
+    if (chip) {
+      chip.addEventListener('click', () => {
+        if (state.page !== 'settings') location.hash = '#/settings';
+      });
+    }
     $('#btn-password').addEventListener('click', () => {
       if (user.passwordManaged) {
         SSD.confirmDialog({
@@ -306,6 +450,8 @@
 
     if (!location.hash) location.replace(`#/${defaultPage()}`);
     await route();
+    // 进来时若已有 IP 库任务在跑（例如上一轮没看完就离开了），顶栏直接接着显示进度
+    ipdbFeed.refresh();
   }
 
   window.Admin = {
@@ -315,9 +461,13 @@
     state,
     helpers,
     start,
+    /** IP 库后台任务订阅器：任何页面都能显示/跟进更新进度 */
+    ipdbFeed,
     ROLE: { admin: '总部管理员', region_admin: '区域管理员', clerk: '店员' },
   };
 
   // 页面模块通过 Admin.register 挂载；这里把 helpers 一并暴露，方便简写
   window.Admin.h = helpers;
+  // IP 库后台任务订阅器同时挂在 helpers 上：页面模块一贯用 h.xxx 取通用能力
+  helpers.ipdbFeed = ipdbFeed;
 })();

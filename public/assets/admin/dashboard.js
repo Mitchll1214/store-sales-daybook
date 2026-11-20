@@ -17,10 +17,18 @@
 
   const KIND_TEXT = { own: '本品', comp: '竞品' };
 
+  /** 自动刷新间隔：页面停在概览上不动，也能看到别人刚提交或刚改的数据 */
+  const AUTO_REFRESH_MS = 30 * 1000;
+
   const state = {
     date: todayStr(),
     data: null,
     open: new Set(),
+    /** 7 日日期段锚点：todayStr 变了说明跨天，日期按钮要重排 */
+    anchor: todayStr(),
+    updatedAt: null,
+    timer: null,
+    loading: false,
   };
 
   function barHeight(qty, max) {
@@ -79,6 +87,47 @@
       .join('')}</div>`;
   }
 
+  /**
+   * 顶部品类汇总图的一根柱：一个品类两根柱（本品 / 竞品），柱下不重复写名字，
+   * 品类名统一由区块底部标注一次，避免两行同样的文字。
+   */
+  function categoryBar(cat, kind, value, max) {
+    const height = barHeight(value, max);
+    const title = `${cat.name} · ${KIND_TEXT[kind]} ${value}`;
+    return `<div class="bar-item bar-item-${kind}" title="${escapeHtml(title)}">
+        <div class="bar-slot">
+          <div class="bar bar-${kind}${value > 0 ? '' : ' zero'}" style="height:${height}px">
+            ${valueLabel(value)}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /**
+   * 当期品类汇总柱形图：按品类把全部可见门店的销量合并，本品与竞品并排。
+   * 柱高按品类内的最大值归一 —— 品类总量天然比单个商品大一截，与下方逐商品图
+   * 共用比例会让商品柱矮得看不清，因此这里单独取尺度。
+   */
+  function renderCategoryChart(categoryTotals) {
+    const list = categoryTotals || [];
+    if (list.length === 0) return '<div class="bars-empty">当天没有可统计的品类</div>';
+    let max = 0;
+    for (const cat of list) max = Math.max(max, Number(cat.own) || 0, Number(cat.comp) || 0);
+    return `<div class="bars cat-sum-bars">${list
+      .map((cat) => {
+        const own = Number(cat.own) || 0;
+        const comp = Number(cat.comp) || 0;
+        return `<div class="bar-cat">
+          <div class="bar-cat-bars cat-sum-cat-bars">
+            ${categoryBar(cat, 'own', own, max)}
+            ${categoryBar(cat, 'comp', comp, max)}
+          </div>
+          <div class="bar-cat-name">${escapeHtml(cat.name)}</div>
+        </div>`;
+      })
+      .join('')}</div>`;
+  }
+
   /** 完成率方块：所有行（含未绑定组、门店行）最左侧统一展示 */
   function rateBox(completion, label) {
     const rate = Number(completion && completion.rate) || 0;
@@ -96,7 +145,7 @@
       <div class="mgr-store-meta">
         <b>${escapeHtml(store.storeCode)}</b>
         <span>${escapeHtml(store.storeName)}</span>
-        <span class="muted small">合计 ${store.totalQty}</span>
+        <span class="muted small">合计 ${store.totalQty} · 本品 ${store.ownQty}</span>
       </div>
       <div class="mgr-chart">${renderChart(store.products, max)}</div>
     </div>`;
@@ -154,9 +203,10 @@
         acc.expected += g.completion.expected;
         acc.stores += g.storeCount;
         acc.qty += g.totalQty;
+        acc.own += g.ownQty || 0;
         return acc;
       },
-      { done: 0, expected: 0, stores: 0, qty: 0 },
+      { done: 0, expected: 0, stores: 0, qty: 0, own: 0 },
     );
     const rate = totals.expected ? Math.round((totals.done / totals.expected) * 1000) / 10 : 0;
     const managers = groups.filter((g) => g.managerId != null).length;
@@ -179,7 +229,7 @@
       <div class="stat">
         <div class="label">当日销量</div>
         <div class="value">${totals.qty}<small>件</small></div>
-        <div class="sub">上午 + 下午合计</div>
+        <div class="sub">本品 ${totals.own} 件 · 上午 + 下午合计</div>
       </div>
     </div>`;
   }
@@ -206,10 +256,35 @@
     });
   }
 
-  async function render(view) {
+  /** 拉取当日数据：概览只看一天，一次请求就是全部内容 */
+  async function load() {
     state.data = await api.get(`/api/reports/manager-day?date=${state.date}`);
+    state.updatedAt = new Date();
+    return state.data;
+  }
 
-    view.innerHTML = `
+  /**
+   * 跨天处理：`todayStr()` 变了说明页面停留过了零点。
+   * 原本停在「今天」的要跟着滚到新的一天，手动选了历史日期的则保持不动；
+   * 无论如何日期段都要按新的 today 重排，否则按钮仍把昨天标成「今天」。
+   */
+  function syncDay() {
+    const today = todayStr();
+    if (today === state.anchor) return false;
+    if (state.date === state.anchor) state.date = today;
+    state.anchor = today;
+    return true;
+  }
+
+  function clockLabel(d) {
+    if (!d) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
+  function markup() {
+    const data = state.data;
+    return `
       <div class="toolbar">
         <div class="seg" id="day-seg">
           ${[0, 1, 2, 3, 4, 5, 6]
@@ -223,31 +298,125 @@
             .join('')}
         </div>
         <div class="grow"></div>
+        <span class="muted small" id="db-updated">更新于 ${escapeHtml(clockLabel(state.updatedAt))}</span>
+        <button class="btn btn-sm btn-ghost" type="button" data-act="refresh">刷新</button>
         <span class="muted small">口径：当天上午 + 下午销量合计，逐商品对比（本品高亮）</span>
       </div>
 
-      ${renderSummary(state.data)}
+      <div class="panel cat-sum-panel" style="margin-top:16px">
+        <div class="panel-head">
+          <div>
+            <h3>${h.fmtDay(data.date)} 品类销量汇总</h3>
+            <p>全部可见门店合计，同一门店不重复计算；本品与竞品并排对比，点击下方分组可继续看各区域管理员与门店明细</p>
+          </div>
+          <div class="grow"></div>
+          <span class="mgr-legend"><i class="dot dot-own"></i>本品<i class="dot dot-comp"></i>竞品</span>
+        </div>
+        <div class="panel-body cat-sum-body">${renderCategoryChart(data.categoryTotals)}</div>
+      </div>
+
+      <div style="margin-top:16px">${renderSummary(data)}</div>
 
       <div class="panel" style="margin-top:16px">
         <div class="panel-head">
           <div>
-            <h3>${h.fmtDay(state.data.date)} 各区域管理员商品销量</h3>
+            <h3>${h.fmtDay(data.date)} 各区域管理员商品销量</h3>
             <p>每个商品单独成柱，本品高亮显示；点击一行展开该管理员名下各门店的明细，当天未提交的商品按 0 计入</p>
           </div>
         </div>
-        <div class="panel-body">${renderOverview(state.data)}</div>
+        <div class="panel-body">${renderOverview(data)}</div>
       </div>`;
+  }
 
+  /**
+   * 重绘整页。自动刷新走 keepScroll：数据变了就地更新，不要把正在看的位置弹回顶部。
+   */
+  function paint(view, { keepScroll = false } = {}) {
+    const top = keepScroll ? window.scrollY : 0;
+    view.innerHTML = markup();
     $$('#day-seg [data-date]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         if (btn.dataset.date === state.date) return;
         state.date = btn.dataset.date;
         state.open.clear();
-        await render(view);
+        await load();
+        paint(view);
       });
     });
-
+    const refreshBtn = $('[data-act="refresh"]', view);
+    if (refreshBtn) refreshBtn.addEventListener('click', () => manualRefresh(view));
     bind(view);
+    if (keepScroll) window.scrollTo({ top });
+  }
+
+  function stopTimer() {
+    if (state.timer) {
+      clearInterval(state.timer);
+      state.timer = null;
+    }
+  }
+
+  /**
+   * 后台静默刷新：数据没变就什么都不做（不重绘、不打断点击与展开），
+   * 变了才整页重绘。失败静默跳过，下一轮再试——后台轮询不该弹错。
+   */
+  async function autoRefresh() {
+    // 已经切到别的页面：停表，等下次进入概览时由 render 重新启动
+    if (window.Admin && window.Admin.state && window.Admin.state.page !== 'dashboard') {
+      stopTimer();
+      return;
+    }
+    if (state.loading) return;
+    state.loading = true;
+    try {
+      const before = JSON.stringify(state.data);
+      const dayChanged = syncDay();
+      await load();
+      if (dayChanged || JSON.stringify(state.data) !== before) {
+        paint($('#view'), { keepScroll: true });
+      } else {
+        // 数据没变也要更新「更新于」，让用户知道页面确实还活着
+        const stamp = $('#db-updated');
+        if (stamp) stamp.textContent = `更新于 ${clockLabel(state.updatedAt)}`;
+      }
+    } catch {
+      /* 静默失败 */
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  async function manualRefresh(view) {
+    const btn = $('[data-act="refresh"]', view);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '刷新中…';
+    }
+    try {
+      syncDay();
+      await load();
+      paint(view, { keepScroll: true });
+    } catch (err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '刷新';
+      }
+      window.SSD.toast((err && err.message) || '刷新失败', 'err');
+    }
+  }
+
+  // 从后台标签页切回来时立刻补一次：切走期间定时器可能已被节流，用户看到的还是旧数
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.data) autoRefresh();
+  });
+
+  async function render(view) {
+    stopTimer();
+    syncDay();
+    await load();
+    paint(view);
+    // 停留在概览上也会自动跟上最新数据（别人刚提交、刚改动都能看到）
+    state.timer = setInterval(autoRefresh, AUTO_REFRESH_MS);
   }
 
   window.Admin.register({

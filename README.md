@@ -22,7 +22,7 @@
 
 **数据隔离是默认行为。** 店员只看到「已提交 / 未提交」和商品**别名**，接口层面不回传历史数量与真实品名。
 
-**单容器部署。** `docker compose up -d --build` 一条命令起来，所有数据落在 `data/` 挂载卷，备份就是拷一个目录。
+**单容器部署，备份不用靠自觉。** `docker compose up -d --build` 一条命令起来，所有数据落在 `data/` 挂载卷；容器内每天自动快照一份（默认保留 14 份），升级前再自动留一份，后台可一键备份 / 下载 / 恢复，整机迁移仍是拷一个目录。
 
 ---
 
@@ -112,9 +112,11 @@ npm test         # 端到端冒烟：真实启动 HTTP 服务跑完整业务链�
 
 **商品档案两个维度。** 「品类」可直接选已有或输入新品类（留空归入「未分类」），「属性」为**本品 / 竞品**。批量导入按「品名、别名、条码、品类、属性」解析。
 
-**概览口径。** 按区域管理员分组展示柱形图：每组是该管理员所辖门店当天上午 + 下午销量逐商品展开，同一品类内本品（高亮）与竞品并排对比；品类区块按品类数量等分整行，商品多寡不影响整体节奏；当天未提交的商品按 0 计入；每组最左侧为当天完成率，点击展开门店明细。未被任何启用区域管理员管辖的门店，单独汇总为「未绑定」一条。
+**概览口径。** 最上方是**当期品类汇总柱形图**：把全部可见门店当天上午 + 下午的销量按品类合并（同一门店被多个管理员管辖时也只算一次），每个品类本品与竞品两根柱并排，柱高按品类内最大值归一。其下按区域管理员分组展示柱形图：每组是该管理员所辖门店当天上午 + 下午销量逐商品展开，同一品类内本品（高亮）与竞品并排对比；品类区块按品类数量等分整行，商品多寡不影响整体节奏；当天未提交的商品按 0 计入；每组最左侧为当天完成率，点击展开门店明细。未被任何启用区域管理员管辖的门店，单独汇总为「未绑定」一条。
 
-**免登录门店链接。** 新建门店自动生成 token，门店列表可复制链接、显示二维码（链接携带门店编码与名称便于区分）、开关可用性、重置 token。可用性开关默认打开。
+**免登录门店链接。** 新建门店自动生成 token，门店列表可复制链接、显示二维码、开关可用性、重置 token。链接与二维码**只含随机 token**，不携带门店编码或名称，转发到聊天里也不会暴露门店身份；可用性开关默认打开。
+
+**门店别名。** 门店可维护一个「别名」，店员端（含免登录会话）页面上所有原本显示门店名称与编码的地方一律显示别名，真实编码与名称只在后台与操作日志里出现；首页问候、填报页抬头、复制文案同样只用别名。别名留空时显示中性的「本门店」。
 
 **设备指纹稳定。** 指纹基于归一化 UA（剥离微信 WebView 的 `NetType/WIFI`、`NetType/4G` 等网络标记与版本号）加屏幕、时区、语言、平台等固有特征，因此**换 IP、切 WiFi/4G/5G 时指纹不变**。
 
@@ -136,10 +138,19 @@ npm test         # 端到端冒烟：真实启动 HTTP 服务跑完整业务链�
 | `SESSION_DAYS` | `14` | 登录会话有效天数 |
 | `COOKIE_SECURE` | `0` | HTTPS 部署设为 `1`，会话 Cookie 加 `Secure` |
 | `INIT_ADMIN_USERNAME` | `admin` | 内置超级管理员的账号名 |
-| `INIT_ADMIN_PASSWORD` | 空 | 配置后**以环境变量为唯一来源**：每次启动校验并同步，系统内（改密页 / 后台重置）不允许修改；留空则首次启动随机生成并写入 `data/initial-admin-password.txt`，此时可自行改密 |
+| `INIT_ADMIN_PASSWORD` | 空 | 配置后**以环境变量为唯一来源**：每次启动校验并同步，系统内（改密页 / 后台重置）不允许修改；留空则首次启动随机生成并写入 `data/initial-admin-password.txt`，此时可自行改密。弱口令（少于 8 位、`admin123` 等常见词、纯数字、连续或重复字符）会在启动日志告警，不阻止启动 |
 | `DATA_DIR` | `./data` | 宿主机数据目录，映射到容器 `/app/data` |
 | `DB_PATH` | 空 | 覆盖 SQLite 文件路径（默认 `$DATA_DIR/app.db`） |
 | `IPDB_IMAGE_FILE` | 空 | 覆盖镜像内置 IP 库路径（默认 `/app/vendor/ip2region_v4.xdb`） |
+| `IPDB_MIRROR_URL` | 空 | 自建 IP 库镜像地址，排在内置下载源之前；完全离线 / 内网部署时使用 |
+| `IPDB_DOWNLOAD_TIMEOUT_MS` | `240000` | 单次下载总超时（毫秒），慢速链路可调大 |
+| `IPDB_DOWNLOAD_IDLE_MS` | `45000` | 连接后多久收不到新数据就放弃（毫秒） |
+| `IPDB_DOWNLOAD_BUDGET_MS` | `300000` | 一轮「更新 IP 库」的总时间预算（毫秒） |
+| `AUTO_BACKUP_HOURS` | `24` | 定时自动备份间隔（小时）；设为 `0` 关闭。启动时若最新一份自动备份已超过该间隔会立即补一份 |
+| `AUTO_BACKUP_KEEP` | `14` | 自动备份保留份数，超出按时间从旧到新清理 |
+| `PRE_RESTORE_KEEP` | `5` | 「恢复前快照」保留份数 |
+| `PRE_UPGRADE_KEEP` | `3` | 「升级前快照」保留份数 |
+| `IMAGE_NAME` / `IMAGE_TAG` | `store-sales-daybook` / `latest` | 镜像名与标签（仅 compose 使用）。升级时用日期标签，旧镜像留在本地便于回滚 |
 
 ### 数据与备份
 
@@ -149,12 +160,28 @@ npm test         # 端到端冒烟：真实启动 HTTP 服务跑完整业务链�
 data/
 ├── app.db                        # SQLite（WAL 模式）
 ├── app.db-wal / app.db-shm
+├── backups/                      # 后台「系统设置 → 数据备份」生成的快照
+│   ├── app-*.db                  #   手动备份（永不自动清理）
+│   ├── auto-*.db                 #   定时自动备份（默认保留 14 份）
+│   ├── pre-restore-*.db          #   恢复前快照（默认保留 5 份）
+│   └── pre-upgrade-*.db          #   升级前快照（默认保留 3 份）
 ├── uploads/                      # 销售凭证图片（单张上限 5MB）
 ├── ipdb/                         # 后台「更新 IP 库」下载的版本（优先于镜像内置）
 └── initial-admin-password.txt    # 仅随机生成初始密码时存在
 ```
 
-备份只需停容器后拷贝整个 `data/`：
+**后台备份**（总部管理员，`系统设置 → 数据备份`）：一键生成快照、下载到本机、从某份快照恢复、删除。
+恢复必须手动输入「恢复」两个字确认，动作前会自动再存一份 `pre-restore` 快照，恢复失败可原路退回；
+恢复会整体替换当前库，因此列表里每份快照都能先看详情（门店数 / 账号数 / 销售记录数）再决定。
+
+**自动备份**不依赖任何人手动点击：
+
+- 默认每 24 小时一份（`AUTO_BACKUP_HOURS`，设 `0` 关闭）。启动时若最新一份已超过该间隔会立即补一份，
+  容器频繁重建也不会白生成。
+- 结构升级前若检测到库需要迁移，会先生成一份 `pre-upgrade` 快照，升级改坏时可从备份页恢复回去。
+- 只有**手动备份永不自动删除**——其余三类按份数从旧到新滚动清理。
+
+**离线备份**（整机迁移 / 换服务器）停容器后拷贝整个 `data/` 即可，包含上表全部内容：
 
 ```bash
 docker compose stop daybook
@@ -166,16 +193,28 @@ docker compose start daybook
 
 ### 升级与更新
 
-`data/` 是唯一的持久化位置，容器本身可以随时重建：
+`data/` 是唯一的持久化位置，容器本身可以随时重建。升级时建议打日期标签，旧镜像留在本地便于回滚：
 
 ```bash
-docker compose up -d --build      # 正常升级：重建镜像，数据卷原样保留
+git pull
+IMAGE_TAG=$(date +%F) docker compose up -d --build   # 生成 store-sales-daybook:2026-11-20
 ```
+
+回滚只要换回旧标签，**不要带 `--build`**（带了会重新构建，等于又升级一次）：
+
+```bash
+docker images | grep store-sales-daybook             # 看本地有哪些标签
+IMAGE_TAG=2026-11-01 docker compose up -d
+```
+
+不设置 `IMAGE_TAG` 时使用 `latest`，新镜像会顶掉上一份 `latest`、无法按标签回滚。除镜像回滚外，
+数据层还有一层保险：升级前的 `pre-upgrade` 快照可在「系统设置 → 数据备份」里恢复。
 
 `--build` 只重建镜像，不会碰宿主机上的 `data/`。如果升级后数据看起来「没了」，按下面顺序排查，而不是急着重灌：
 
-1. **看启动日志第一行** `[db] 数据库：/app/data/app.db（已存在 / 新建）`。
+1. **看启动日志的数据库路径** `[db] 数据库：/app/data/app.db（已存在 / 新建）`。
    显示「新建」说明读到的不是原来那个库——多半是数据卷没挂上、`DATA_DIR` 被改过，或换了工作目录，数据其实还在旧路径。
+   此时启动日志还会打印一段 `⚠ 警告`，直接指出在别的路径发现了已有数据库。
 2. `docker compose config` 确认 `volumes` 里 `data` 的宿主机路径与 `DATA_DIR` 一致。
 3. 宿主机上 `ls -la data/` 是否还有 `app.db`、`uploads/`。
 
@@ -187,6 +226,8 @@ docker compose up -d --build      # 正常升级：重建镜像，数据卷原�
 
 - **校验更新**：只查上游版本，不下载
 - **更新 IP 库**：下载最新 xdb，校验可解析后热替换，无需重启
+
+下载源默认是一组公共镜像（jsDelivr 多节点 + GitHub 反代），按探测延迟排序、逐个回退。内网或完全离线部署时，把 `IPDB_MIRROR_URL` 指向自建镜像（如 `http://10.0.0.5/ip2region_v4.xdb`），它会排在最前面；慢速链路可用 `IPDB_DOWNLOAD_TIMEOUT_MS` / `IPDB_DOWNLOAD_IDLE_MS` 放宽超时。
 
 本地不使用 Docker 时，`npm run fetch:ipdb` 会生成同样的 `vendor/`。
 
@@ -218,7 +259,7 @@ node --experimental-sqlite scripts/reset-password.js --user admin          # 随
 node --experimental-sqlite scripts/reset-password.js --user admin --password 新密码 --unlock
 ```
 
-重置会清除该账号的全部会话并写入操作日志。容器内执行：
+重置会清除该账号的全部会话并写入操作日志。新密码要求至少 8 位，且不能是 `admin123` 这类常见词、纯数字、连续或重复字符（确需弱密码时加 `--allow-weak`）。容器内执行：
 
 ```bash
 docker compose exec daybook node --experimental-sqlite scripts/reset-password.js --user admin
@@ -239,9 +280,10 @@ src/
 ├── audit.js                  # 操作日志写入与查询
 ├── ipdb.js                   # ip2region 解析、版本校验与热更新
 ├── report.js                 # 概览柱形图 / 单日总览 / 门店完成率 / 明细
+├── backup.js                 # 数据库快照、保留策略、定时自动备份、恢复
 ├── env.js                    # 本地运行时加载 .env（与 compose 行为一致）
 ├── util.js                   # 时区、日期、时段状态等公共工具
-└── routes/                   # auth stores catalog users sales reports logs
+└── routes/                   # auth stores catalog users sales reports logs backup
 public/                       # login / clerk（店员）/ admin（后台）/ password，无构建步骤
 scripts/
 ├── fetch-ipdb.js             # 镜像构建期预置 IP 库
@@ -262,12 +304,13 @@ assets/readme/                # README 配图：数据流向 SVG 与各页面截
 | 挂载前缀 | 接口 |
 | --- | --- |
 | `/api/auth` | `GET /bootstrap`、`POST /login`、`POST /logout`、`GET /me`、`POST /password` |
-| `/api/stores` | `GET /`、`POST /`、`POST /batch`（批量粘贴编码+名称）、`GET/PUT /:id`、`PUT /:id/products`、`PATCH /:id/auto-login`、`POST /:id/rotate-token`、`GET /:id/qrcode` |
+| `/api/stores` | `GET /`、`POST /`、`POST /batch`（批量粘贴编码+名称+可选别名）、`GET/PUT /:id`、`PUT /:id/products`、`PATCH /:id/auto-login`、`POST /:id/rotate-token`、`GET /:id/qrcode` |
 | `/api/products` | `GET /`、`POST /`、`POST /batch`、`PUT/DELETE /:id` |
 | `/api/users` | `GET /`、`POST /`、`GET /options`、`PUT/DELETE /:id`、`POST /:id/reset-password` |
 | `/api/sales` | `GET /home`、`GET /session`、`PUT /entry`、`POST /fill-zero`、`POST /submit`、`GET/POST /images`、`GET /images/:id/file`、`DELETE /images/:id` |
 | `/api/reports` | `GET /manager-day`（概览柱形图）、`GET /options`、`GET /recent`（7 日完成率）、`GET /day`（单日逐门店）、`GET /stores`（区间完成率）、`GET /detail`（按日期折叠）、`GET /export`（CSV） |
 | `/api/logs` | `GET /`、`POST /delete`（勾选删除，删除动作本身写审计）、`GET /ipdb`、`POST /ipdb/check`、`POST /ipdb/update` |
-| `/s/:token` | `GET /s/:token?c=<门店编码>&n=<门店名称>`，免登录入口（不在 `/api` 下） |
+| `/api/backup` | `GET /`（当前库信息 + 备份列表）、`POST /`（手动备份）、`GET /:name`（详情）、`GET /:name/download`、`POST /:name/restore`（需 `confirmText=恢复`）、`DELETE /:name` |
+| `/s/:token` | `GET /s/:token`，免登录入口（不在 `/api` 下）；链接只含随机 token，不带门店编码与名称 |
 
 页面入口：`/login`、`/clerk`（店员移动端）、`/admin`（后台）、`/password`、`/healthz`（健康检查，compose healthcheck 使用）。

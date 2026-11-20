@@ -1,9 +1,8 @@
 'use strict';
 
-const crypto = require('crypto');
 const { clientIp, computeFingerprint, uaSkeleton, deviceLabel, networkType } = require('./net');
 const { randomToken, verifyPassword } = require('./security');
-const { nowStamp, stampOf, HttpError, dateStrOf, localNow } = require('./util');
+const { nowStamp, stampOf, HttpError, dateStrOf, localNow, storeAlias } = require('./util');
 const { passwordManagedExternally } = require('./db');
 
 const COOKIE_NAME = 'ssd_sid';
@@ -49,8 +48,10 @@ function addDaysStamp(days) {
 }
 
 /**
- * 设备档案：device_id 由前端在 localStorage 持久化（切 IP/网络不变），
- * fingerprint 由归一化 UA + 稳定终端特征计算，二者一起落库便于追溯。
+ * 设备档案：本设备上的每次操作都记录同一个设备指纹。
+ * fingerprint 是轻量浏览器指纹（少量公开环境字段 → FNV-1a 双通道 16 位短码），
+ * device_id 优先用前端 localStorage 里持久化的 id，没有时才用指纹兜底——
+ * 二者都落库，便于按设备追溯。
  */
 function captureDevice(req) {
   const header = req.headers['x-device-id'];
@@ -66,13 +67,14 @@ function captureDevice(req) {
       client = null;
     }
   }
+  // 已经是 16 位十六进制短码，不再做二次哈希：日志里展示什么、库里存什么保持一致
   const fingerprint = computeFingerprint({ userAgent: ua, client });
-  const deviceId = raw || `fp_${crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 32)}`;
+  const deviceId = raw || `fp_${fingerprint}`;
   req.deviceId = deviceId;
-  req.deviceFingerprint = crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 32);
+  req.deviceFingerprint = fingerprint;
   req.deviceMeta = client;
   req.networkType = networkType(ua);
-  return { deviceId, fingerprint: req.deviceFingerprint, ua };
+  return { deviceId, fingerprint, ua };
 }
 
 class Auth {
@@ -117,14 +119,17 @@ class Auth {
     let store = null;
     if (session.store_id) {
       store = this.db
-        .prepare('SELECT id, code, name, status FROM stores WHERE id = ?')
+        .prepare('SELECT id, code, name, alias, status FROM stores WHERE id = ?')
         .get(session.store_id);
     } else if (user && user.store_id) {
       store = this.db
-        .prepare('SELECT id, code, name, status FROM stores WHERE id = ?')
+        .prepare('SELECT id, code, name, alias, status FROM stores WHERE id = ?')
         .get(user.store_id);
     }
     const storeIds = user && user.role === 'region_admin' ? this.loadStoreIds(user.id) : [];
+    // 免登录会话没有账号，操作人姓名只能取自门店；日志里仍要能定位到哪家店，
+    // 所以这里保留真实名称，只在返给店员端时换成别名（见 publicUser）。
+    const autoLogin = Boolean(session.login_via === 'auto');
     return {
       id: user ? user.id : null,
       username: user ? user.username : null,
@@ -134,8 +139,10 @@ class Auth {
       storeId: store ? store.id : null,
       storeCode: store ? store.code : null,
       storeName: store ? store.name : null,
+      /** 门店别名：店员端唯一可见的门店标识，后台与日志继续用真实编码 / 名称 */
+      storeAlias: store ? storeAlias(store) : null,
       storeIds,
-      autoLogin: Boolean(session.login_via === 'auto'),
+      autoLogin,
       mustChangePassword: Boolean(user && user.must_change_password),
       /** 账号是否由环境变量托管（内置超级管理员且配置了 INIT_ADMIN_PASSWORD） */
       isBuiltin: Boolean(user && user.is_builtin),

@@ -2,37 +2,17 @@
 
 /* ============================================================
    店销日集 · 前端公共层
-   - 设备标识：localStorage 持久化 device_id + 稳定终端特征（不含网络类型）
+   - 设备指纹：只上报少量公开环境字段，由服务端算成 16 位短码（不含网络类型）
    - API 封装：统一错误提示、401 跳转
    - UI：toast / modal / 格式化
    ============================================================ */
 
 (function () {
-  const STORAGE_KEY = 'ssd_device_id';
-
-  /** 生成/复用设备标识。切换 IP、切换 WiFi/4G/5G、微信版本升级都不会改变它 */
-  function getDeviceId() {
-    try {
-      let id = localStorage.getItem(STORAGE_KEY);
-      if (id && /^[A-Za-z0-9_-]{8,128}$/.test(id)) return id;
-      const raw = [
-        Date.now().toString(36),
-        Math.random().toString(36).slice(2, 10),
-        (navigator.hardwareConcurrency || 0).toString(36),
-        (screen.width || 0).toString(36),
-        (screen.height || 0).toString(36),
-      ].join('');
-      id = `d_${raw}`.slice(0, 64);
-      localStorage.setItem(STORAGE_KEY, id);
-      return id;
-    } catch {
-      return 'd_ephemeral';
-    }
-  }
-
   /**
-   * 稳定终端特征（服务端用于计算指纹）。
-   * 刻意不含任何网络信息：online 状态、connection.type、IP 等一律不采集。
+   * 参与指纹的终端特征（服务端据此算 16 位短码）。
+   * 刻意不含任何网络与易变信息：online 状态、connection.type、IP、
+   * 电池、GPU、UA 里的 NetType/MMWEBID 等一律不采集，
+   * 这样同一台设备切 WiFi / 移动数据、清缓存后重进，指纹都一样。
    */
   function deviceMeta() {
     const m = {
@@ -42,7 +22,6 @@
       language: navigator.language || '',
       platform: navigator.platform || '',
       hardwareConcurrency: navigator.hardwareConcurrency || 0,
-      deviceMemory: navigator.deviceMemory || 0,
     };
     try {
       m.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
@@ -62,7 +41,6 @@
     }
   }
 
-  const DEVICE_ID = getDeviceId();
   const DEVICE_META = encodeMeta();
 
   /* ---------------- API ---------------- */
@@ -77,7 +55,7 @@
 
   async function request(method, url, body, options = {}) {
     const headers = {
-      'x-device-id': DEVICE_ID,
+      // 只上报环境特征，由服务端算成 16 位设备指纹短码；不再发送本地随机 id
       'x-device-meta': DEVICE_META,
     };
     let payload;
@@ -126,7 +104,6 @@
     patch: (url, body, options) => request('PATCH', url, body, options),
     del: (url, options) => request('DELETE', url, undefined, options),
     upload: (url, formData) => request('POST', url, formData),
-    deviceId: DEVICE_ID,
   };
 
   /* ---------------- 工具 ---------------- */
@@ -162,6 +139,9 @@
       '<path d="M12 3.2 20 7.6v8.8L12 20.8 4 16.4V7.6z"/><path d="M4 7.6 12 12l8-4.4"/><path d="M12 12v8.8"/><path d="M8 5.4l8 4.4"/>',
     search: '<circle cx="10.7" cy="10.7" r="6.3"/><path d="M15.4 15.4 20.4 20.4"/>',
     check: '<circle cx="12" cy="12" r="8.6"/><path d="M8 12.4l2.9 2.9L16.4 9.7"/>',
+    /* 系统设置：齿轮 */
+    settings:
+      '<circle cx="12" cy="12" r="3.1"/><path d="M12 2.9l1.4 2.3 2.7-.4.6 2.6 2.4 1.3-1 2.5 1 2.5-2.4 1.3-.6 2.6-2.7-.4L12 21.1l-1.4-2.3-2.7.4-.6-2.6-2.4-1.3 1-2.5-1-2.5 2.4-1.3.6-2.6 2.7.4z"/>',
   };
 
   /** 渲染一个线性图标；未知名称回退到 inbox，避免出现空白占位 */
@@ -426,7 +406,6 @@
     confirmDialog,
     promptDialog,
     logout,
-    deviceId: DEVICE_ID,
     deviceMeta,
   };
 })();

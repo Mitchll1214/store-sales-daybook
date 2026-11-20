@@ -1,9 +1,16 @@
 services:
   daybook:
     build: .
-    image: store-sales-daybook:latest
+    # 镜像标签可配置：升级时打日期标签，旧镜像会留在本地，回滚只需换回旧标签。
+    #   IMAGE_TAG=$(date +%F) docker compose up -d --build   # 升级，生成 store-sales-daybook:2026-11-20
+    #   IMAGE_TAG=2026-11-01 docker compose up -d            # 回滚到旧镜像（不要带 --build）
+    # 不设置 IMAGE_TAG 时沿用 latest，新镜像会顶掉上一份 latest、无法按标签回滚。
+    image: "${IMAGE_NAME:-store-sales-daybook}:${IMAGE_TAG:-latest}"
     container_name: store-sales-daybook
     restart: unless-stopped
+    # 优雅关闭预算：进程收到 SIGTERM 后会先 checkpoint WAL 再退出（内部兜底 8 秒），
+    # Docker 默认只给 10 秒，这里放宽到 30 秒，确保 WAL 能落盘、不留下半写文件。
+    stop_grace_period: 30s
     ports:
       - "${APP_PORT:-3000}:3000"
     environment:
@@ -14,6 +21,18 @@ services:
       COOKIE_SECURE: "${COOKIE_SECURE:-0}"
       INIT_ADMIN_USERNAME: "${INIT_ADMIN_USERNAME:-admin}"
       INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:-}"
+      # 备份策略：compose 的 environment 是白名单，未列出的变量不会进容器，
+      # 因此在 .env 里改这几项必须同步出现在这里，否则等于没改。
+      AUTO_BACKUP_HOURS: "${AUTO_BACKUP_HOURS:-24}"
+      AUTO_BACKUP_KEEP: "${AUTO_BACKUP_KEEP:-14}"
+      PRE_RESTORE_KEEP: "${PRE_RESTORE_KEEP:-5}"
+      PRE_UPGRADE_KEEP: "${PRE_UPGRADE_KEEP:-3}"
+      # IP 库下载源与超时：离线部署可指向自建镜像；留空则用代码内置的默认源与阈值。
+      # 空字符串在各处都会被当作「未设置」回退默认值，因此列出来不会改变默认行为。
+      IPDB_MIRROR_URL: "${IPDB_MIRROR_URL:-}"
+      IPDB_DOWNLOAD_TIMEOUT_MS: "${IPDB_DOWNLOAD_TIMEOUT_MS:-}"
+      IPDB_DOWNLOAD_IDLE_MS: "${IPDB_DOWNLOAD_IDLE_MS:-}"
+      IPDB_DOWNLOAD_BUDGET_MS: "${IPDB_DOWNLOAD_BUDGET_MS:-}"
       TZ: Asia/Shanghai
     volumes:
       # SQLite 数据库、上传图片、在线更新的 IP 库都在这里，务必持久化

@@ -159,10 +159,11 @@
   async function openUserDialog(user, onDone) {
     const isEdit = Boolean(user);
     const role = isEdit ? user.role : 'clerk';
-    // 打开弹窗时再拉一次门店列表：刚在门店管理里新增 / 改名的门店能立刻选到
+    // 打开弹窗时再拉一次门店列表：刚在门店管理里新增 / 改名的门店能立刻选到。
+    // 编辑时排除本人，否则自己正管辖的门店会被当成「已被占用」而默认隐藏。
     if (isAdmin()) {
       try {
-        state.options = await api.get('/api/users/options');
+        state.options = await api.get(`/api/users/options${isEdit ? `?excludeUserId=${user.id}` : ''}`);
       } catch {
         /* 拉取失败时沿用上次缓存，不阻断弹窗 */
       }
@@ -203,21 +204,28 @@
         <div class="field" data-for="region_admin"><label>管辖门店（可多选）</label>
           <div class="store-picker">
             <div class="picker-head">
-              <input class="input" id="us-store-filter" type="search" placeholder="搜索门店编码或名称" autocomplete="off">
+              <input class="input" id="us-store-filter" type="search" placeholder="搜索门店编码或名称，多个关键词用逗号分隔" autocomplete="off">
               <button class="btn btn-sm btn-ghost" type="button" data-pick="all">全选</button>
               <button class="btn btn-sm btn-ghost" type="button" data-pick="none">清空</button>
               <span class="pick-count" id="us-store-count">已选 0 家</span>
             </div>
+            <label class="picker-toggle">
+              <input type="checkbox" id="us-store-showall">
+              <span>显示全部门店（含已被其他区域管理员管辖的）</span>
+            </label>
             <div class="picker-grid" id="us-store-grid">
               ${state.options.stores
                 .map((s) => {
                   const selected = isEdit && user.storeIds.includes(s.id);
-                  return `<label class="pick-item" data-search="${escapeHtml(`${s.code} ${s.name}`)}">
+                  return `<label class="pick-item" data-search="${escapeHtml(`${s.code} ${s.name}`)}" data-bound="${
+                    s.bound ? '1' : '0'
+                  }">
                     <input type="checkbox" value="${s.id}" ${selected ? 'checked' : ''}>
                     <span class="pick-text">
                       <b>${escapeHtml(s.code)}</b>
                       <span>${escapeHtml(s.name)}</span>
                     </span>
+                    ${s.bound ? '<span class="pill pill-info">已被管辖</span>' : ''}
                     ${s.status === 'disabled' ? '<span class="pill">停用</span>' : ''}
                   </label>`;
                 })
@@ -225,7 +233,7 @@
             </div>
             <div class="picker-empty" id="us-store-empty" hidden>没有匹配的门店</div>
           </div>
-          <div class="hint">区域管理员只能查看这些门店的填报与报表数据。</div></div>
+          <div class="hint">默认只列出尚未被其他区域管理员管辖的门店；需要跨区关联时勾选上方「显示全部门店」。区域管理员只能查看这些门店的填报与报表数据。</div></div>
         <div class="field"><label>手机号（可选）</label>
           <input class="input" id="us-phone" value="${escapeHtml(isEdit ? user.phone : '')}"></div>
         ${
@@ -258,26 +266,49 @@
     if (!isEdit) $('#us-role', m.root).addEventListener('change', updateRoleFields);
     updateRoleFields();
 
-    /* ---- 管辖门店：勾选卡片（搜索 / 全选 / 清空 / 已选计数） ---- */
+    /* ---- 管辖门店：勾选卡片（默认只看未绑定门店 / 多关键词搜索 / 全选 / 清空 / 已选计数） ---- */
     const boxes = () => $$('#us-store-grid input[type="checkbox"]', m.root);
     const pickedIds = () => boxes().filter((i) => i.checked).map((i) => Number(i.value));
+    const showAllInput = $('#us-store-showall', m.root);
+    const filterInput = $('#us-store-filter', m.root);
+
     /** 同步卡片高亮与「已选 N 家」 */
     const syncPickState = () => {
       boxes().forEach((box) => box.closest('.pick-item').classList.toggle('checked', box.checked));
       $('#us-store-count', m.root).textContent = `已选 ${pickedIds().length} 家`;
     };
     const visibleBoxes = () => boxes().filter((i) => !i.closest('.pick-item').hidden);
-    boxes().forEach((box) => box.addEventListener('change', syncPickState));
-    $('#us-store-filter', m.root).addEventListener('input', (e) => {
-      const q = e.target.value.trim().toLowerCase();
+
+    /**
+     * 按「显示全部 + 搜索词」重算可见门店。
+     *
+     * 隐藏规则：
+     * 1. 未勾选「显示全部」时，隐藏已被其他区域管理员管辖的门店（data-bound=1）；
+     *    但已勾选的门店始终可见——编辑账号时不能把他现有的管辖范围藏起来；
+     * 2. 搜索词按逗号（含全角，）拆分，任一关键词命中即可（OR），空关键词忽略。
+     */
+    const applyFilter = () => {
+      const showAll = showAllInput.checked;
+      const keywords = filterInput.value
+        .split(/[,，]/)
+        .map((k) => k.trim().toLowerCase())
+        .filter(Boolean);
       let shown = 0;
       $$('.pick-item', m.root).forEach((item) => {
-        const hit = !q || item.dataset.search.toLowerCase().includes(q);
+        const box = item.querySelector('input[type="checkbox"]');
+        const hiddenByBound = !showAll && !box.checked && item.dataset.bound === '1';
+        const text = item.dataset.search.toLowerCase();
+        const hitKeyword = keywords.length === 0 || keywords.some((k) => text.includes(k));
+        const hit = !hiddenByBound && hitKeyword;
         item.hidden = !hit;
         if (hit) shown += 1;
       });
       $('#us-store-empty', m.root).hidden = shown > 0;
-    });
+    };
+
+    boxes().forEach((box) => box.addEventListener('change', syncPickState));
+    filterInput.addEventListener('input', applyFilter);
+    showAllInput.addEventListener('change', applyFilter);
     $$('[data-pick]', m.root).forEach((btn) => {
       btn.addEventListener('click', () => {
         // 「全选」只作用于当前筛选出的门店，避免搜索时误选全部
@@ -288,6 +319,7 @@
         syncPickState();
       });
     });
+    applyFilter();
     syncPickState();
 
     $('[data-act="cancel"]', m.root).addEventListener('click', m.close);

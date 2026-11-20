@@ -99,23 +99,39 @@ async function main() {
     assert.strictEqual(r.data.created.length, 3);
     assert.strictEqual(r.data.skipped.length, 1);
   });
-  await check('门店自动生成免登录链接且带编码名称参数', async () => {
+  await check('门店自动生成免登录链接，且不含编码与名称', async () => {
     const r = await call('GET', '/api/stores', undefined, { session: admin });
     assert.strictEqual(r.status, 200);
     assert.strictEqual(r.data.rows.length, 3);
     const s = r.data.rows[0];
     assert.ok(s.autoLoginToken, '缺少 token');
     assert.ok(s.autoLoginUrl.includes('/s/'), s.autoLoginUrl);
-    assert.ok(s.autoLoginUrl.includes('c=S001'), s.autoLoginUrl);
-    assert.ok(/n=%E4%B8%8A%E6%B5%B7/.test(s.autoLoginUrl), s.autoLoginUrl);
+    // 链接与二维码会被转发、截图、留在聊天记录里，不能出现门店编码或名称
+    assert.ok(!s.autoLoginUrl.includes('c='), s.autoLoginUrl);
+    assert.ok(!s.autoLoginUrl.includes('n='), s.autoLoginUrl);
+    assert.ok(!s.autoLoginUrl.includes(s.code), s.autoLoginUrl);
+    assert.ok(!s.autoLoginUrl.includes(encodeURIComponent(s.name)), s.autoLoginUrl);
     assert.strictEqual(s.autoLoginEnabled, true);
   });
-  await check('修改门店名称与状态', async () => {
+  await check('修改门店名称、别名与状态', async () => {
     const list = await call('GET', '/api/stores', undefined, { session: admin });
+    const s1 = list.data.rows.find((s) => s.code === 'S001');
+    // 别名是店员端唯一可见的标识，真实编码与名称只留在后台
+    const r1 = await call(
+      'PUT',
+      `/api/stores/${s1.id}`,
+      { code: 'S001', name: '上海一店', alias: '华东一店', status: 'active' },
+      { session: admin },
+    );
+    assert.strictEqual(r1.status, 200, JSON.stringify(r1.data));
+    assert.strictEqual(r1.data.store.alias, '华东一店');
+    assert.strictEqual(r1.data.store.displayAlias, '华东一店');
     const s3 = list.data.rows.find((s) => s.code === 'S003');
     const r = await call('PUT', `/api/stores/${s3.id}`, { code: 'S003', name: '广州一店', status: 'active' }, { session: admin });
     assert.strictEqual(r.status, 200, JSON.stringify(r.data));
     assert.strictEqual(r.data.store.name, '广州一店');
+    // 未填别名时用与真实编码、名称都无关的兜底文案
+    assert.strictEqual(r.data.store.displayAlias, '本门店');
   });
   let products = [];
   await check('创建商品（含别名、条码、品类与属性）', async () => {
@@ -233,6 +249,17 @@ async function main() {
     assert.strictEqual(r.data.slots[0].periods[0].state, 'due');
     assert.ok(r.data.productCount >= 3);
   });
+  await check('店员端所有响应都不含真实门店编码与名称', async () => {
+    // 别名只是店员端的展示口径：真实编码 / 名称仍留在后台、日志与报表里
+    for (const url of ['/api/me', '/api/sales/home', '/api/sales/session?period=am']) {
+      const r = await call('GET', url, undefined, { session: store });
+      assert.strictEqual(r.status, 200, `${url} → ${JSON.stringify(r.data)}`);
+      const raw = JSON.stringify(r.data);
+      assert.ok(!raw.includes('S001'), `${url} 泄漏真实门店编码`);
+      assert.ok(!raw.includes('上海一店'), `${url} 泄漏真实门店名称`);
+      assert.ok(raw.includes('华东一店'), `${url} 缺少门店别名`);
+    }
+  });
   await check('填报会话只返回别名，不返回真实品名与条码', async () => {
     const r = await call('GET', '/api/sales/session?period=am', undefined, { session: store });
     assert.strictEqual(r.status, 200, JSON.stringify(r.data));
@@ -314,12 +341,14 @@ async function main() {
   console.log('\n[4] 免登录门店链接');
   await check('门店链接可直接进入店员页', async () => {
     const auto = jar();
-    const r = await call('GET', `/s/${clerkStore.autoLoginToken}?c=S001&n=test`, undefined, { session: auto });
+    const r = await call('GET', `/s/${clerkStore.autoLoginToken}`, undefined, { session: auto });
     assert.strictEqual(r.status, 302);
     assert.strictEqual(r.headers.get('location'), '/clerk');
     const home = await call('GET', '/api/sales/home', undefined, { session: auto });
     assert.strictEqual(home.status, 200);
-    assert.strictEqual(home.data.store.code, 'S001');
+    // 店员端只认别名，真实编码与名称一律不下发
+    assert.strictEqual(home.data.store.alias, '华东一店');
+    assert.ok(!('code' in home.data.store) && !('name' in home.data.store), JSON.stringify(home.data.store));
     assert.strictEqual(home.data.autoLogin, true);
   });
   await check('关闭开关后链接失效', async () => {
@@ -509,6 +538,36 @@ async function main() {
       bound.products.some((x) => x.kind === 'own' && x.qty > 0),
       '本品应有销量用于高亮展示',
     );
+  });
+  await check('顶层品类汇总：按品类合并全部门店，同一门店只算一次', async () => {
+    const r = await call('GET', `/api/reports/manager-day?date=${today}`, undefined, { session: admin });
+    assert.ok(Array.isArray(r.data.categoryTotals), '缺少 categoryTotals');
+    assert.deepStrictEqual(
+      r.data.categoryTotals.map((c) => c.name),
+      r.data.categories,
+      '品类汇总顺序应与下方分组一致',
+    );
+    const drink = r.data.categoryTotals.find((c) => c.name === '饮料');
+    assert.ok(drink, '缺少饮料品类');
+    assert.strictEqual(drink.total, drink.own + drink.comp);
+    // 口径是「全部可见门店」：同一商品在各组的销量相加，多管理员管辖的重叠门店不重复计
+    const qtyOf = (kind) =>
+      r.data.groups
+        .flatMap((g) => g.stores)
+        .filter((s, i, arr) => arr.findIndex((x) => x.storeCode === s.storeCode) === i)
+        .reduce(
+          (acc, store) =>
+            acc + store.products.filter((p) => p.category === '饮料' && p.kind === kind).reduce((a, p) => a + p.qty, 0),
+          0,
+        );
+    assert.strictEqual(drink.own, qtyOf('own'));
+    assert.strictEqual(drink.comp, qtyOf('comp'));
+  });
+  await check('区域管理员的品类汇总只含所辖门店', async () => {
+    const r = await call('GET', `/api/reports/manager-day?date=${today}`, undefined, { session: multi });
+    const total = r.data.categoryTotals.reduce((acc, c) => acc + c.total, 0);
+    const grouped = r.data.groups.reduce((acc, g) => acc + g.totalQty, 0);
+    assert.strictEqual(total, grouped, '汇总总量应等于各组门店销量之和');
   });
   await check('未分类商品归入「未分类」且排在最后', async () => {
     const noCat = await call('POST', '/api/products', { name: '杂项', alias: '杂项', category: '' }, { session: admin });

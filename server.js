@@ -5,7 +5,7 @@ require('./src/env');
 
 const path = require('path');
 const express = require('express');
-const { openDatabase } = require('./src/db');
+const { openDatabase, closeDatabase } = require('./src/db');
 const { IpDatabase } = require('./src/ipdb');
 const { Audit } = require('./src/audit');
 const { Auth, homePath, parseCookies, COOKIE_NAME } = require('./src/auth');
@@ -18,6 +18,8 @@ const { createUserRoutes } = require('./src/routes/users');
 const { createSalesRoutes } = require('./src/routes/sales');
 const { createReportRoutes } = require('./src/routes/reports');
 const { createLogRoutes } = require('./src/routes/logs');
+const { createBackupRoutes } = require('./src/routes/backup');
+const { startAutoBackup } = require('./src/backup');
 
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -50,6 +52,7 @@ async function createApp() {
   app.use('/api/sales', createSalesRoutes({ db, audit }));
   app.use('/api/reports', createReportRoutes({ db, audit }));
   app.use('/api/logs', createLogRoutes({ db, audit, ipdb }));
+  app.use('/api/backup', createBackupRoutes({ db, audit }));
 
   app.get(
     '/api/me',
@@ -165,7 +168,11 @@ async function createApp() {
   }, 3600 * 1000);
   sweeper.unref();
 
-  return { app, db, ipdb, audit, auth };
+  // 定时自动备份：备份不能只靠管理员手动点，否则没人点就等于没有备份。
+  // 只用 AUTO_BACKUP_HOURS=0 可关闭；内部异常只记日志，不影响主服务。
+  const autoBackup = startAutoBackup(db);
+
+  return { app, db, ipdb, audit, auth, autoBackup };
 }
 
 function renderMessage(title, detail) {
@@ -189,10 +196,42 @@ function renderMessage(title, detail) {
 
 if (require.main === module) {
   createApp()
-    .then(({ app }) => {
-      app.listen(PORT, HOST, () => {
+    .then(({ app, db }) => {
+      const server = app.listen(PORT, HOST, () => {
         console.log(`店销日集已启动：http://${HOST}:${PORT}  （数据目录 ${DATA_DIR}）`);
       });
+
+      // docker compose stop / restart 默认发 SIGTERM，此前没有处理，进程被直接杀掉，
+      // 未 checkpoint 的 -wal 留在数据卷里，下次启动就可能自检判损坏并清库。
+      // 这里先把 WAL 合并进主库再退出；重复信号只生效一次。
+      let closing = false;
+      const shutdown = (signal) => {
+        if (closing) return;
+        closing = true;
+        console.log(`[server] 收到 ${signal}，正在优雅关闭…`);
+
+        let done = false;
+        let timer = null;
+        const finish = (reason) => {
+          if (done) return;
+          done = true;
+          if (timer) clearTimeout(timer);
+          closeDatabase(db, reason);
+          process.exit(0);
+        };
+
+        // 这个定时器**不能 unref**：它同时承担「保活」职责。若 unref，一旦 server.close
+        // 因 keep-alive 连接迟迟不回调，事件循环就没有任何待办，进程会直接退出，
+        // 收尾代码永远执行不到（实测 WAL 残留 300KB 未合并）。
+        timer = setTimeout(() => finish(`${signal} 超时强制关闭`), 8000);
+
+        // 先停止接收新请求，再收尾数据库：避免关库瞬间还有写事务在跑。
+        server.close(() => finish(signal));
+        // keep-alive 空闲连接不会自己断，server.close 会一直等它们；主动清理掉。
+        if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
+      };
+      process.on('SIGTERM', () => shutdown('SIGTERM'));
+      process.on('SIGINT', () => shutdown('SIGINT'));
     })
     .catch((err) => {
       console.error('启动失败：', err);

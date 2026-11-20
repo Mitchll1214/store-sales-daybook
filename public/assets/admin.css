@@ -176,6 +176,22 @@
   flex: 1;
 }
 
+/* 手机端专用的顶栏入口（如「退出」）：桌面端由侧边栏提供，这里默认隐藏 */
+.only-mobile {
+  display: none;
+}
+
+/* IP 库后台任务胶囊：`.pill` 是 inline-flex，会盖掉 hidden 属性，这里补回 */
+.ipdb-chip[hidden] {
+  display: none;
+}
+
+.ipdb-chip {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
 .admin-content {
   padding: 22px 24px 40px;
   flex: 1;
@@ -413,6 +429,10 @@
   border-radius: 10px;
   padding: 3px;
   gap: 2px;
+  /* 窄屏放不下时让按钮自己压缩，而不是把整个页面撑宽：
+     一旦内容宽过视口，手机会把整页缩小显示，字和柱子会一起变糊。 */
+  max-width: 100%;
+  min-width: 0;
 }
 
 .seg button {
@@ -426,6 +446,10 @@
   cursor: pointer;
   transition: background 0.16s, color 0.16s;
   white-space: nowrap;
+  /* 允许被压缩，但不允许把父级撑到视口之外 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .seg button.active {
@@ -863,12 +887,16 @@ table.data.user-table tbody tr:hover {
   white-space: nowrap;
 }
 
-/* 柱形图本体：每个商品一根柱，本品实色高亮、竞品浅灰退后 */
+/* 柱形图本体：每个商品一根柱，本品实色高亮、竞品浅灰退后。
+   min-width: min-content 是「保底可读」的开关：容器够宽时 width:100% 让
+   各品类等分整行；一旦品类/商品多到每根柱不足最小宽度，容器就被撑到
+   各柱最小宽度之和，交给 .mgr-chart 横向滑动，柱子再也不会被压成细线。 */
 .bars {
   display: flex;
   align-items: flex-end;
   gap: 0;
   width: 100%;
+  min-width: min-content;
   min-height: 112px;
   /* 给柱顶外侧的数量标签留出空间，避免被裁切 */
   padding-top: 22px;
@@ -876,14 +904,15 @@ table.data.user-table tbody tr:hover {
 
 /* 一个品类一个区块。宽度按「品类数」等分整行，而不是按商品数分配：
    否则商品多的品类挤成一片、商品少的品类只剩一根孤柱，两端还会留白。
-   等分后每个品类占据相同视觉重量，跨品类比较时节奏一致。 */
+   等分后每个品类占据相同视觉重量，跨品类比较时节奏一致。
+   min-width: min-content 保证品类内每根柱都有可读宽度，不足时改由横向滑动。 */
 .bar-cat {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
   flex: 1 1 0;
-  min-width: 0;
+  min-width: min-content;
   padding: 0 clamp(4px, 0.7vw, 10px);
   position: relative;
 }
@@ -894,24 +923,28 @@ table.data.user-table tbody tr:hover {
 }
 
 /* 品类内的柱子均分本区块宽度。间距收得很紧：商品多的品类（如 8 个）
-   每一份宽度本来就小，间距再留大一点，柱子就会被挤成细线。 */
+   每一份宽度本来就小，间距再留大一点，柱子就会被挤成细线。
+   高度只给下限、不再写死：柱高 96 + 商品名两行本就超过 96，
+   写死后整列会从顶部溢出，最高柱的数字标签被滚动容器裁掉。 */
 .bar-cat-bars {
   display: flex;
   align-items: flex-end;
   justify-content: center;
   gap: clamp(1px, 0.22vw, 6px);
   width: 100%;
-  height: 96px;
+  min-height: 96px;
   min-width: 0;
 }
 
+/* 每根柱的最小宽度（含商品名所在列）：低于这个值数字标签会粘连、
+   商品名会被拆成竖排，因此它是横向滑动触发的下限，而不是可以继续压缩的宽度。 */
 .bar-item {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 34px;
   max-width: 128px;
 }
 
@@ -989,16 +1022,20 @@ table.data.user-table tbody tr:hover {
 
 /* 商品名：本品加粗上色，竞品淡一些，扫一眼就能分辨。
    品类等分后单列可能很窄（如某品类 8 个商品），因此允许折成两行，
-   超出两行才省略；完整名称另有 title 提示，不靠文字硬撑。 */
+   超出两行才省略；完整名称另有 title 提示，不靠文字硬撑。
+   固定两行高度：一行的名字若比两行的短，柱子底部会随之上移，
+   同一品类里的柱基线就参差了；锁定高度后所有柱脚落在同一条线上。
+   断行用 overflow-wrap 而不是 break-all —— 后者会把每个汉字拆成一行。 */
 .bar-name {
   width: 100%;
   max-width: 68px;
+  min-height: 2.3em;
   font-size: clamp(9px, 1.05vw, 10.5px);
   line-height: 1.15;
   color: var(--ink-3);
   text-align: center;
   overflow: hidden;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1026,6 +1063,39 @@ table.data.user-table tbody tr:hover {
   font-size: 12px;
   color: var(--ink-3);
   padding: 30px 0;
+}
+
+/* 顶部品类汇总图：一个品类两根柱（本品 / 竞品）并排。
+   两根柱贴在一起、中间不留空隙，才看得出它们属于同一品类；
+   品类之间仍用分隔线，区块内不再重复写商品名。
+   品类一多，柱子总宽会超过面板：这里自己横向滑动，不把面板撑破。 */
+.cat-sum-body {
+  padding-top: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+/* 品类少时若仍按品类等分整行，两块各占半屏、两根柱孤零零留在中间。
+   这里改为「按内容宽度聚拢、居中排布」，并给每块一个下限宽度：
+   品类多到放不下时才退回等分压缩 + 横向滑动。 */
+.cat-sum-bars {
+  justify-content: center;
+}
+
+.cat-sum-bars .bar-cat {
+  flex: 0 1 150px;
+  min-width: 88px;
+}
+
+/* 同一品类两根柱贴紧、中间只留一道细缝：看得出是一组，又不会糊成一根 */
+.cat-sum-cat-bars {
+  gap: 3px;
+}
+
+.cat-sum-cat-bars .bar-item {
+  max-width: 40px;
 }
 
 /* 完成率热力格 */
@@ -1182,6 +1252,7 @@ table.heat td.tap:hover {
   overflow: hidden;
 }
 
+/* 门店头既是折叠开关，也是「收起时唯一的看点」：这里把 button 的默认外观抹掉 */
 .store-block-head {
   display: flex;
   align-items: center;
@@ -1190,14 +1261,83 @@ table.heat td.tap:hover {
   background: #fbfcfd;
   font-size: 13px;
   flex-wrap: wrap;
+  width: 100%;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  transition: background 0.14s;
+}
+
+.store-block-head:hover {
+  background: #f5f9fa;
 }
 
 .store-block-head b {
   font-variant-numeric: tabular-nums;
 }
 
+/* 门店层与时段层共用同一个箭头语义：收起向右，展开朝下 */
+.store-block-head .chev,
+.period-head .chev {
+  color: var(--ink-4);
+  font-size: 11px;
+  transition: transform 0.18s;
+  width: 12px;
+  flex-shrink: 0;
+}
+
+/* 用 > 限定直接子元素，避免展开门店时把内层时段的箭头一起转过去 */
+.store-block.open > .store-block-head .chev,
+.period-block.open > .period-head .chev {
+  transform: rotate(90deg);
+}
+
+/* 门店默认收起：收起时只看合计，展开才露出上午 / 下午 */
 .store-block-body {
-  padding: 10px 12px;
+  display: none;
+  padding: 8px 12px 12px;
+}
+
+.store-block.open > .store-block-body {
+  display: block;
+}
+
+/* 第三层：上午 / 下午。默认同样收起，头部长显该时段合计 */
+.period-block + .period-block {
+  margin-top: 6px;
+}
+
+.period-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 7px;
+  background: #f7fafb;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: inherit;
+  transition: background 0.14s;
+}
+
+.period-head:hover {
+  background: #eef5f7;
+}
+
+.period-body {
+  display: none;
+  padding: 2px 2px 4px;
+}
+
+.period-block.open > .period-body {
+  display: block;
 }
 
 .entry-table {
@@ -1541,6 +1681,30 @@ table.data.log-table tbody tr.picked:hover {
   white-space: nowrap;
 }
 
+/* 「显示全部门店」开关：默认折叠已被其他区域管理员管辖的门店 */
+.picker-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.picker-toggle input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.picker-toggle:hover {
+  color: var(--ink);
+}
+
 .picker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
@@ -1745,6 +1909,11 @@ table.data.log-table tbody tr.picked:hover {
     display: none;
   }
 
+  /* 顶栏的退出入口只在手机端出现：桌面端侧边栏底部已经有「改密码 / 退出」 */
+  .only-mobile {
+    display: inline-flex;
+  }
+
   .admin-topbar {
     padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px;
     min-height: 56px;
@@ -1812,6 +1981,46 @@ table.data.log-table tbody tr.picked:hover {
     order: 3;
     flex-basis: 100%;
     padding-bottom: 2px;
+    /* 手机屏上品类一多，按品类等分整行会把每根柱压成十几像素的细线、
+       商品名逐字折行。改为固定柱宽、整块横向滑动：柱子始终有可读宽度，
+       排不下时左右滑看，而不是把一切都挤进屏幕宽度里。 */
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  .mgr-chart .bars {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .bar-cat {
+    flex: 0 0 auto;
+    padding: 0 8px;
+  }
+
+  .bar-cat-bars {
+    gap: 6px;
+    min-height: 96px;
+  }
+
+  .bar-item {
+    flex: 0 0 auto;
+    width: 46px;
+  }
+
+  .bar {
+    max-width: 26px;
+  }
+
+  .bar-own {
+    max-width: 28px;
+  }
+
+  .bar-name {
+    max-width: 46px;
   }
 
   .mgr-chev {
@@ -1846,6 +2055,25 @@ table.data.log-table tbody tr.picked:hover {
 
   .bar-name {
     max-width: 56px;
+  }
+
+  /* 窄屏下的分段控件（日期 / 报表页签）：按钮不再跟着整页一起缩，
+     而是保持字号可读、放不下时自己横向滑动。分段控件的按钮被压到
+     四十来像素后，内边距就吃掉大半个按钮，文字只剩省略号。 */
+  .seg {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  .seg::-webkit-scrollbar {
+    display: none;
+  }
+
+  .seg button {
+    flex: 0 0 auto;
+    padding: 7px 11px;
   }
 
   .toolbar .search-box {

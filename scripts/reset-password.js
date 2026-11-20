@@ -20,7 +20,7 @@ require('../src/env');
 const path = require('path');
 const crypto = require('crypto');
 const { openDatabase } = require('../src/db');
-const { hashPassword } = require('../src/security');
+const { hashPassword, passwordWeakness } = require('../src/security');
 const { nowStamp } = require('../src/util');
 
 function parseArgs(argv) {
@@ -69,10 +69,13 @@ function main() {
     password = crypto.randomBytes(9).toString('base64url');
     generated = true;
   }
-  if (!args.allowWeak && password.length < 8) {
-    console.error('新密码至少 8 位；如确需弱密码请加 --allow-weak。');
-    process.exitCode = 1;
-    return;
+  if (!args.allowWeak) {
+    const weakness = passwordWeakness(password);
+    if (weakness) {
+      console.error(`${weakness}；如确需弱密码请加 --allow-weak。`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   // openDatabase 会执行迁移与初始化；这里只是借助它保证 schema 可用

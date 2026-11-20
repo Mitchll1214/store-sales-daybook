@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const express = require('express');
 const QRCode = require('qrcode');
 const { requireAuth, requireRole, visibleStoreIds } = require('../auth');
-const { asyncHandler, HttpError, parseStoreLines, nowStamp } = require('../util');
+const { asyncHandler, HttpError, parseStoreLines, nowStamp, storeAlias } = require('../util');
 
 /** 对外可访问的站点根地址：优先 PUBLIC_BASE_URL，其次按反向代理头推导 */
 function baseUrl(req) {
@@ -19,10 +19,9 @@ function newToken() {
   return crypto.randomBytes(18).toString('base64url');
 }
 
-/** 免登录链接带上门店编码与名称，便于在聊天/二维码说明中区分门店 */
+/** 免登录链接只带 token：门店编码与名称不再出现在链接、二维码或聊天记录里 */
 function autoLoginUrl(req, store) {
-  const qs = `c=${encodeURIComponent(store.code)}&n=${encodeURIComponent(store.name)}`;
-  return `${baseUrl(req)}/s/${store.auto_login_token}?${qs}`;
+  return `${baseUrl(req)}/s/${store.auto_login_token}`;
 }
 
 function shapeStore(req, store, extra = {}) {
@@ -34,6 +33,9 @@ function shapeStore(req, store, extra = {}) {
     id: store.id,
     code: store.code,
     name: store.name,
+    alias: store.alias || '',
+    /** 店员端实际会看到的门店标识（别名留空时的兜底文案） */
+    displayAlias: storeAlias(store),
     status: store.status,
     autoLoginEnabled: Boolean(store.auto_login_enabled),
     autoLoginToken: canSeeLink ? store.auto_login_token : null,
@@ -95,8 +97,8 @@ function createStoreRoutes({ db, audit }) {
       const where = [`s.id IN (${marks})`];
       const params = [...ids];
       if (q) {
-        where.push('(s.code LIKE ? OR s.name LIKE ?)');
-        params.push(`%${q}%`, `%${q}%`);
+        where.push('(s.code LIKE ? OR s.name LIKE ? OR s.alias LIKE ?)');
+        params.push(`%${q}%`, `%${q}%`, `%${q}%`);
       }
       if (status) {
         where.push('s.status = ?');
@@ -122,7 +124,7 @@ function createStoreRoutes({ db, audit }) {
     }),
   );
 
-  /** 批量新增：每行「编码 名称」，支持制表符/逗号/空白分隔 */
+  /** 批量新增：每行「编码 名称 [别名]」，支持制表符/逗号/空白分隔 */
   router.post(
     '/batch',
     requireRole('admin'),
@@ -134,8 +136,8 @@ function createStoreRoutes({ db, audit }) {
       }
       const stamp = nowStamp();
       const insert = db.prepare(
-        `INSERT INTO stores (code, name, status, auto_login_token, auto_login_enabled, created_at, updated_at)
-         VALUES (?, ?, 'active', ?, 1, ?, ?)`,
+        `INSERT INTO stores (code, name, alias, status, auto_login_token, auto_login_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, 'active', ?, 1, ?, ?)`,
       );
       const exists = db.prepare('SELECT id FROM stores WHERE code = ?');
       const created = [];
@@ -146,8 +148,8 @@ function createStoreRoutes({ db, audit }) {
             skipped.push({ code: row.code, name: row.name, reason: '编码已存在' });
             continue;
           }
-          insert.run(row.code, row.name, newToken(), stamp, stamp);
-          created.push({ code: row.code, name: row.name });
+          insert.run(row.code, row.name, row.alias || null, newToken(), stamp, stamp);
+          created.push({ code: row.code, name: row.name, alias: row.alias || null });
         }
       })();
       audit.log(req, {
@@ -179,12 +181,13 @@ function createStoreRoutes({ db, audit }) {
         return res.status(409).json({ error: '门店编码已存在' });
       }
       const stamp = nowStamp();
+      const alias = String(req.body.alias || '').trim() || null;
       const info = db
         .prepare(
-          `INSERT INTO stores (code, name, status, auto_login_token, auto_login_enabled, remark, created_at, updated_at)
-           VALUES (?, ?, 'active', ?, 1, ?, ?, ?)`,
+          `INSERT INTO stores (code, name, alias, status, auto_login_token, auto_login_enabled, remark, created_at, updated_at)
+           VALUES (?, ?, ?, 'active', ?, 1, ?, ?, ?)`,
         )
-        .run(code, name, newToken(), req.body.remark || null, stamp, stamp);
+        .run(code, name, alias, newToken(), req.body.remark || null, stamp, stamp);
       const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(Number(info.lastInsertRowid));
       audit.log(req, {
         action: 'store_create',
@@ -192,7 +195,7 @@ function createStoreRoutes({ db, audit }) {
         targetId: store.id,
         detail: {
           summary: `新增门店 ${store.code} ${store.name}`,
-          context: { status: store.status, remark: store.remark || null },
+          context: { alias: store.alias || null, status: store.status, remark: store.remark || null },
           note: '免登录链接已生成',
         },
       });
@@ -234,9 +237,11 @@ function createStoreRoutes({ db, audit }) {
       }
       const status = req.body.status === 'disabled' ? 'disabled' : 'active';
       const remark = req.body.remark === undefined ? store.remark : req.body.remark;
+      const alias =
+        req.body.alias === undefined ? store.alias || null : String(req.body.alias || '').trim() || null;
       db.prepare(
-        `UPDATE stores SET code = ?, name = ?, status = ?, remark = ?, updated_at = ? WHERE id = ?`,
-      ).run(code, name, status, remark || null, nowStamp(), store.id);
+        `UPDATE stores SET code = ?, name = ?, alias = ?, status = ?, remark = ?, updated_at = ? WHERE id = ?`,
+      ).run(code, name, alias, status, remark || null, nowStamp(), store.id);
       audit.log(req, {
         action: 'store_update',
         targetType: 'store',
@@ -246,6 +251,7 @@ function createStoreRoutes({ db, audit }) {
           changes: [
             { field: 'code', from: store.code, to: code },
             { field: 'name', from: store.name, to: name },
+            { field: 'alias', from: store.alias || '', to: alias || '' },
             { field: 'status', from: store.status, to: status },
             { field: 'remark', from: store.remark || '', to: remark || '' },
           ],
@@ -335,7 +341,7 @@ function createStoreRoutes({ db, audit }) {
     }),
   );
 
-  /** 二维码（SVG），内容为带门店编码与名称的免登录链接 */
+  /** 二维码（SVG）：内容与免登录链接一致，只有 token，不含门店编码与名称 */
   router.get(
     '/:id/qrcode',
     asyncHandler(async (req, res) => {

@@ -3,7 +3,7 @@
 const express = require('express');
 const { requireAuth, requireRole, ROLE_LABEL } = require('../auth');
 const { asyncHandler, nowStamp, HttpError } = require('../util');
-const { hashPassword } = require('../security');
+const { hashPassword, passwordWeakness } = require('../security');
 const { passwordManagedExternally } = require('../db');
 
 /** 用户管理：总部管理员创建/维护账号；区域管理员直接管辖若干门店，无「区域」这一层 */
@@ -103,7 +103,27 @@ function createUserRoutes({ db, audit }) {
     '/options',
     requireRole('admin'),
     asyncHandler(async (req, res) => {
-      const stores = db.prepare('SELECT id, code, name, status FROM stores ORDER BY code').all();
+      // 编辑账号时排除其本人：他正管辖的门店不该被算成「已被别人占着」，
+      // 否则打开编辑弹窗前端的默认过滤会把门店藏起来，反而看不到自己当前的范围。
+      const excludeUserId = Number(req.query.excludeUserId) || 0;
+      const stores = db
+        .prepare(
+          `SELECT s.id, s.code, s.name, s.status,
+                  (SELECT count(*) FROM user_stores us
+                     JOIN users u ON u.id = us.user_id
+                    WHERE us.store_id = s.id AND u.role = 'region_admin' AND us.user_id <> ?) AS other_managers
+             FROM stores s
+            ORDER BY s.code`,
+        )
+        .all(excludeUserId)
+        .map((s) => ({
+          id: s.id,
+          code: s.code,
+          name: s.name,
+          status: s.status,
+          /** 已被其他区域管理员管辖：前端默认折叠，可切换显示全部后关联 */
+          bound: s.other_managers > 0,
+        }));
       res.json({ stores });
     }),
   );
@@ -124,7 +144,8 @@ function createUserRoutes({ db, audit }) {
         return res.status(400).json({ error: '账号需为 3-32 位字母、数字或 _ . @ -' });
       }
       if (!['admin', 'region_admin', 'clerk'].includes(role)) return res.status(400).json({ error: '角色不合法' });
-      if (password.length < 8) return res.status(400).json({ error: '密码至少 8 位' });
+      const weak = passwordWeakness(password);
+      if (weak) return res.status(400).json({ error: weak });
       if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) {
         return res.status(409).json({ error: '账号已存在' });
       }
@@ -241,7 +262,8 @@ function createUserRoutes({ db, audit }) {
         throw new HttpError(403, '该账号的密码由环境变量 INIT_ADMIN_PASSWORD 托管，系统内不可重置');
       }
       const password = String(req.body.password || '');
-      if (password.length < 8) return res.status(400).json({ error: '密码至少 8 位' });
+      const weak = passwordWeakness(password);
+      if (weak) return res.status(400).json({ error: weak });
       db.prepare(
         'UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?',
       ).run(hashPassword(password), nowStamp(), user.id);

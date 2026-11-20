@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { requireAuth, requireRole } = require('../auth');
-const { asyncHandler, isDateStr, todayStr, addDays, HttpError } = require('../util');
+const { asyncHandler, isDateStr, todayStr, addDays } = require('../util');
 
 /** 操作日志（仅总部管理员）：分页查询、动作字典、IP 库状态与更新 */
 function createLogRoutes({ db, audit, ipdb }) {
@@ -68,61 +68,92 @@ function createLogRoutes({ db, audit, ipdb }) {
     }),
   );
 
-  /** 校验上游是否需要更新（只读） */
+  /**
+   * 后台更新任务的轮询入口。
+   * 任务状态存在 ipdb 实例上，因此用户切到别的页面再回来、甚至刷新浏览器，
+   * 都还能接上同一次下载，不会因为离开页面就把进度丢了。
+   */
+  router.get(
+    '/ipdb/job',
+    asyncHandler(async (req, res) => {
+      res.json({ job: ipdb.jobSnapshot(), status: ipdb.status() });
+    }),
+  );
+
+  /** 校验上游是否需要更新（只读，不下载） */
   router.post(
     '/ipdb/check',
     asyncHandler(async (req, res) => {
       const result = await ipdb.checkUpdate();
-      audit.log(req, {
-        action: 'ipdb_check',
-        targetType: 'ipdb',
-        detail: result.reachable
-          ? {
-              summary: `校验 IP 库：${result.hasUpdate ? '发现新版本' : '已是最新'}`,
-              context: {
-                current: result.current.revision ? String(result.current.revision).slice(0, 10) : '未知',
-                upstream: result.latest.revision ? String(result.latest.revision).slice(0, 10) : '未知',
-              },
-            }
-          : {
-              summary: '校验 IP 库失败',
-              note: result.reason,
-            },
-      });
+      // 只读校验不写审计：它已并进「校验更新」按钮，每次点击都留痕只会把日志刷满。
+      // 真正需要追溯的「下没下成」由 ipdb_update / ipdb_update_failed 记录。
       res.json(result);
     }),
   );
 
-  /** 下载并热更新 IP 库 */
+  /**
+   * 启动后台更新。
+   *
+   * 立即返回 202 与任务快照，不在这里 await 下载完成：11 MB 的多源回退可能跑几分钟，
+   * 挂在请求上会让用户必须守着页面，切换页面或网络抖动都会让前端以为失败。
+   * 任务结束后（无论成败）写一条审计，用户可在操作日志里查证结果。
+   */
   router.post(
     '/ipdb/update',
     asyncHandler(async (req, res) => {
-      try {
-        const result = await ipdb.update();
-        audit.log(req, {
-          action: 'ipdb_update',
-          targetType: 'ipdb',
-          detail: {
-            summary: '更新 IP 库成功',
-            context: {
-              revision: result.meta.revision ? String(result.meta.revision).slice(0, 10) : '未知',
-              size: `${Math.round((result.meta.size || 0) / 1024)} KB`,
-              downloadSource: (result.via && result.via.label) || '未知',
-            },
-          },
-        });
-        res.json({ ok: true, ...result, status: ipdb.status() });
-      } catch (err) {
-        audit.log(req, {
-          action: 'ipdb_update_failed',
-          targetType: 'ipdb',
-          detail: {
-            summary: '更新 IP 库失败',
-            note: err.message,
-          },
-        });
-        throw new HttpError(502, err.message);
+      // 审计需要「谁发起的」，但任务完成时请求对象早已结束，这里先把它摘下来
+      const actorReq = {
+        user: req.user,
+        deviceId: req.deviceId,
+        headers: {
+          'x-real-ip': req.headers['x-real-ip'],
+          'x-forwarded-for': req.headers['x-forwarded-for'],
+          'user-agent': req.headers['user-agent'],
+        },
+        socket: req.socket ? { remoteAddress: req.socket.remoteAddress } : {},
+      };
+
+      const { started, job } = ipdb.startUpdate();
+      if (!started) {
+        // 已有任务在跑：直接回当前进度，前端继续轮询即可
+        return res.status(202).json({ ok: true, started: false, job, status: ipdb.status() });
       }
+
+      // 任务结束时补写审计（成功与失败都要留痕，否则「更新过没有」无从查证）
+      ipdb
+        .waitForUpdate()
+        .then((finished) => {
+          if (finished.result) {
+            const meta = finished.result.meta || {};
+            audit.log(actorReq, {
+              action: 'ipdb_update',
+              targetType: 'ipdb',
+              detail: {
+                summary: '更新 IP 库成功',
+                context: {
+                  revision: meta.revision ? String(meta.revision).slice(0, 10) : '未知',
+                  size: `${Math.round((meta.size || 0) / 1024)} KB`,
+                  downloadSource: (finished.result.via && finished.result.via.label) || '未知',
+                  elapsed: `${Math.round((finished.elapsedMs || 0) / 1000)} 秒`,
+                },
+              },
+            });
+          } else {
+            audit.log(actorReq, {
+              action: 'ipdb_update_failed',
+              targetType: 'ipdb',
+              detail: {
+                summary: '更新 IP 库失败',
+                note: finished.error || '未知错误',
+              },
+            });
+          }
+        })
+        .catch((err) => {
+          console.warn('[ipdb] 写入更新审计失败：', err.message);
+        });
+
+      res.status(202).json({ ok: true, started: true, job, status: ipdb.status() });
     }),
   );
 

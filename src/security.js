@@ -40,6 +40,74 @@ function randomToken(bytes = 32) {
   return crypto.randomBytes(bytes).toString('base64url');
 }
 
+/**
+ * 常见弱口令清单：只收「一眼就能被字典命中」的那些。
+ * 不追求完整（那该用 zxcvbn 之类），只求拦住 admin123 这种最典型的部署事故。
+ */
+const WEAK_PASSWORDS = new Set([
+  '12345678',
+  '123456789',
+  '1234567890',
+  '87654321',
+  '88888888',
+  '66666666',
+  '11111111',
+  'password',
+  'password1',
+  'passw0rd',
+  'p@ssw0rd',
+  'qwertyui',
+  'qwerty123',
+  'abc12345',
+  'abcd1234',
+  'a1234567',
+  'admin',
+  'admin123',
+  'admin888',
+  'adminadmin',
+  'administrator',
+  'root1234',
+  'letmein1',
+  'welcome1',
+  'iloveyou',
+  'changeme',
+  'store123',
+  'daybook123',
+]);
+
+/**
+ * 判断密码强度是否不可接受，返回原因（字符串），acceptable 时返回 null。
+ *
+ * 只在「用户自己设密码」与「环境变量配的管理员密码」两处使用：
+ * 后者不阻止启动（托管密码由运维负责，强行拒绝会让服务起不来），
+ * 但会在日志里大声提醒，避免 admin123 这种默认值悄悄留在线上。
+ */
+function passwordWeakness(password) {
+  const value = String(password || '');
+  if (!value) return '密码不能为空';
+  if (value.length < 8) return '密码至少 8 位';
+  const lower = value.toLowerCase();
+  if (WEAK_PASSWORDS.has(lower)) return '这是常见弱口令，容易被字典猜中';
+  if (/^\d+$/.test(value)) return '不能是纯数字';
+  if (/^(.)\1+$/.test(value)) return '不能是同一个字符重复';
+  if (isSequential(lower)) return '不能是连续字符';
+  return null;
+}
+
+/** 整串是否「逐位递增或递减」（abcdefgh、87654321 这类） */
+function isSequential(value) {
+  if (value.length < 4) return false;
+  let ascending = true;
+  let descending = true;
+  for (let i = 1; i < value.length; i += 1) {
+    const delta = value.charCodeAt(i) - value.charCodeAt(i - 1);
+    if (delta !== 1) ascending = false;
+    if (delta !== -1) descending = false;
+    if (!ascending && !descending) return false;
+  }
+  return ascending || descending;
+}
+
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
@@ -81,4 +149,4 @@ class LoginLimiter {
   }
 }
 
-module.exports = { hashPassword, verifyPassword, randomToken, sha256, LoginLimiter };
+module.exports = { hashPassword, verifyPassword, randomToken, sha256, passwordWeakness, LoginLimiter };

@@ -3,7 +3,7 @@
 const express = require('express');
 const { asyncHandler } = require('../util');
 const { requireAuth, homePath, COOKIE_NAME } = require('../auth');
-const { hashPassword, verifyPassword } = require('../security');
+const { hashPassword, verifyPassword, passwordWeakness } = require('../security');
 const { clientIp } = require('../net');
 const { passwordManagedExternally } = require('../db');
 
@@ -121,8 +121,9 @@ function createAuthRoutes({ db, auth, audit, limiter }) {
           code: 'BUILTIN_PASSWORD_MANAGED',
         });
       }
-      if (!newPassword || String(newPassword).length < 8) {
-        return res.status(400).json({ error: '新密码至少 8 位' });
+      const weak = passwordWeakness(newPassword);
+      if (weak) {
+        return res.status(400).json({ error: weak });
       }
       const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
       if (!row || !verifyPassword(oldPassword, row.password_hash)) {
@@ -153,15 +154,21 @@ function createAuthRoutes({ db, auth, audit, limiter }) {
 }
 
 function publicUser(user) {
+  // 店员端（含免登录会话）只认门店别名：真实编码与名称属于后台与日志口径，
+  // 不下发到店员页面。后台账号（总部 / 区域管理员）保持原样。
+  const clerkView = user.role === 'clerk' || user.autoLogin;
   return {
     id: user.id,
-    name: user.name,
+    // 免登录会话没有账号，name 里带的是「真实店名（免登录）」，店员端换成别名
+    name: user.autoLogin === true && !user.username ? `${user.storeAlias || '本门店'}（免登录）` : user.name,
     username: user.username,
     role: user.role,
     roleLabel: user.roleLabel,
     storeId: user.storeId,
-    storeCode: user.storeCode,
-    storeName: user.storeName,
+    storeCode: clerkView ? null : user.storeCode,
+    storeName: clerkView ? null : user.storeName,
+    /** 门店别名：店员端展示的唯一门店标识 */
+    storeAlias: user.storeAlias || null,
     /** 区域管理员直接管辖的门店 */
     storeIds: user.storeIds || [],
     autoLogin: user.autoLogin,

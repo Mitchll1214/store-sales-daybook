@@ -40,7 +40,12 @@
           <p id="page-sub"></p>
         </div>
         <div class="spacer"></div>
+        <button class="pill pill-info ipdb-chip" type="button" id="ipdb-chip" hidden
+          title="IP 库正在后台更新，点击查看进度"></button>
         <div id="topbar-actions" style="display:flex;gap:8px;align-items:center"></div>
+        <!-- 手机端侧边栏整体隐藏，改密码/退出原本无处可点；顶栏补一个退出入口 -->
+        <button class="btn btn-sm btn-ghost only-mobile" type="button" id="btn-logout-mobile"
+          aria-label="退出登录">退出</button>
       </header>
       <main class="admin-content">
         <div class="content-max" id="view"></div>
@@ -59,6 +64,7 @@
   <script src="/assets/admin/catalog.js"></script>
   <script src="/assets/admin/users.js"></script>
   <script src="/assets/admin/logs.js"></script>
+  <script src="/assets/admin/settings.js"></script>
   <script src="/assets/admin/boot.js"></script>
 </body>
 </html>

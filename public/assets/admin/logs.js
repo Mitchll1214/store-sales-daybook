@@ -3,7 +3,7 @@
 /* ============================================================
    操作日志（仅总部管理员）
    - 来源列默认展示 IP 归属地（ip2region），点击表头切换为 IP + 设备指纹
-   - IP 库状态展示与「校验 / 更新」按钮
+   - IP 库的状态与「校验 / 更新」入口在「系统设置」里，本页只消费它写入的日志
    ============================================================ */
 
 (function () {
@@ -38,6 +38,7 @@
     log_delete: '删除操作日志',
     sales_submit: '提交销售数据',
     sales_fill_zero: '批量记 0',
+    sales_correct: '修正销售明细',
     image_upload: '上传凭证图片',
     image_delete: '删除凭证图片',
     report_export: '导出报表',
@@ -68,7 +69,6 @@
     data: null,
     actions: [],
     mode: 'location', // location | device
-    ipdb: null,
     // 勾选只对当前页有效：翻页、改筛选、刷新都会清空，避免「以为还在选」地误删
     selected: new Set(),
   };
@@ -116,11 +116,12 @@
       const loc = row.ip_location || '—';
       return `<td class="device-cell">${escapeHtml(loc)}<span class="fp">${escapeHtml(row.ip || '')}</span></td>`;
     }
+    // device_id 没有前端 id 时就是 `fp_<16 位短码>`，这里去掉前缀只留短码；
+    // 老数据里的前端持久化 id 原样展示，两种都能按设备追溯。
+    const fpText = String(row.device_id || '').replace(/^fp_/, '');
     return `<td class="device-cell">${escapeHtml(row.device || '未知设备')}
       <span class="fp">${escapeHtml(row.ip || '')}</span>
-      <span class="fp" title="${escapeHtml(row.device_id || '')}">指纹 ${
-      escapeHtml(String(row.device_id || '').slice(0, 16)) || '—'
-    }</span></td>`;
+      <span class="fp" title="${escapeHtml(row.device_id || '')}">指纹 ${escapeHtml(fpText) || '—'}</span></td>`;
   }
 
   /**
@@ -218,38 +219,6 @@
       <input class="input" type="date" id="lg-from" value="${state.from}" max="${todayStr()}">
       <span class="muted small">至</span>
       <input class="input" type="date" id="lg-to" value="${state.to}" max="${todayStr()}">
-    </div>`;
-  }
-
-  function renderIpdb() {
-    const s = state.ipdb;
-    if (!s) return '';
-    const badge = s.loaded
-      ? `<span class="pill pill-ok">已加载</span>`
-      : `<span class="pill pill-danger">未加载</span>`;
-    const meta = s.meta || {};
-    return `<div class="panel">
-      <div class="panel-head">
-        <div>
-          <h3>IP 归属地库（ip2region）${badge}</h3>
-          <p>${escapeHtml(
-            s.loaded
-              ? `${s.source === 'updated' ? '在线更新版本' : '镜像内置版本'}${
-                  meta.revision ? ` · ${String(meta.revision).slice(0, 10)}` : ''
-                }${meta.builtAt ? ` · 构建于 ${String(meta.builtAt).slice(0, 10)}` : ''}`
-              : s.error || '未能加载 IP 库文件，日志将仅记录 IP 原值',
-          )}</p>
-        </div>
-        <div class="spacer" style="flex:1"></div>
-        <button class="btn btn-sm btn-ghost" type="button" id="ipdb-check">校验更新</button>
-        <button class="btn btn-sm btn-soft" type="button" id="ipdb-update">更新 IP 库</button>
-      </div>
-      <div class="panel-body">
-        <p class="small muted" style="margin:0">
-          校验只读取上游版本信息，不下载；更新会下载最新 v4 xdb 并热替换，无需重启服务。
-          上游：<span class="mono">${escapeHtml((s.upstream && s.upstream.repo) || '')}</span>
-        </p>
-      </div>
     </div>`;
   }
 
@@ -433,68 +402,11 @@
         await paint();
       });
     });
-
-    const checkBtn = $('#ipdb-check');
-    if (checkBtn) {
-      checkBtn.addEventListener('click', async () => {
-        checkBtn.disabled = true;
-        checkBtn.textContent = '校验中…';
-        try {
-          const result = await api.post('/api/logs/ipdb/check', {});
-          if (!result.reachable) toast(result.reason || '无法连接上游', 'err');
-          else if (result.hasUpdate) toast('发现新的 IP 库版本，可点击「更新 IP 库」', 'ok');
-          else toast('当前 IP 库已是最新版本', 'ok');
-          await loadIpdb();
-          await paint();
-        } catch (err) {
-          toast(err.message || '校验失败', 'err');
-        } finally {
-          checkBtn.disabled = false;
-          checkBtn.textContent = '校验更新';
-        }
-      });
-    }
-
-    const updateBtn = $('#ipdb-update');
-    if (updateBtn) {
-      updateBtn.addEventListener('click', async () => {
-        const ok = await window.SSD.confirmDialog({
-          title: '更新 IP 库',
-          message:
-            '将从 GitHub 及其 CDN 镜像下载最新版 ip2region xdb（约 11 MB）并热替换，期间归属地解析会短暂使用旧库。网络较慢时可能需等待 1–3 分钟，请勿关闭页面。继续吗？',
-          okText: '开始更新',
-        });
-        if (!ok) return;
-        updateBtn.disabled = true;
-        updateBtn.textContent = '下载中…';
-        try {
-          const result = await api.post('/api/logs/ipdb/update', {});
-          const via = result.via && result.via.label ? `，下载源 ${result.via.label}` : '';
-          const rev = ((result.status.meta && result.status.meta.revision) || '').slice(0, 10);
-          toast(`IP 库已更新${rev ? `（版本 ${rev}）` : ''}${via}`, 'ok');
-          await loadIpdb();
-          await paint();
-        } catch (err) {
-          toast(err.message || '更新失败', 'err');
-        } finally {
-          updateBtn.disabled = false;
-          updateBtn.textContent = '更新 IP 库';
-        }
-      });
-    }
-  }
-
-  async function loadIpdb() {
-    try {
-      state.ipdb = await api.get('/api/logs/ipdb');
-    } catch {
-      state.ipdb = null;
-    }
   }
 
   async function paint() {
     const view = $('#view');
-    view.innerHTML = `${renderToolbar()}${renderTable()}${renderIpdb()}`;
+    view.innerHTML = `${renderToolbar()}${renderTable()}`;
     bind();
     mountPager();
     h.subtitle(`默认展示 IP 归属地，点击来源列表头可切换设备指纹`);
@@ -506,7 +418,7 @@
     subtitle: '账号、密码、图片等关键操作全量记录',
     render: async (view) => {
       view.innerHTML = `<div class="panel"><div class="panel-body"><div class="skeleton" style="height:140px"></div></div></div>`;
-      await Promise.all([loadLogs(), loadIpdb()]);
+      await loadLogs();
       await paint();
     },
   });

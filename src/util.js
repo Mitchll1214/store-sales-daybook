@@ -128,7 +128,19 @@ function chunkArray(list, size) {
   return out;
 }
 
-/** 从粘贴文本解析门店：每行「编码 + 名称」，支持制表符/逗号/空白分隔 */
+/** 门店别名：店员端唯一可见的标识。
+ *  未设置别名时给一个与真实编码、真实名称都无关的兜底文案，
+ *  避免「没填别名」直接退化成展示真实店名。 */
+function storeAlias(store) {
+  const alias = String((store && store.alias) || '').trim();
+  return alias || '本门店';
+}
+
+/**
+ * 从粘贴文本解析门店：每行「编码 + 名称 [+ 别名]」。
+ * 别名是店员端唯一可见的标识，可选；用制表符 / 逗号分隔时第三段作为别名，
+ * 纯空白分隔时保持「编码 + 名称」两段，避免把名称里的空格误当别名。
+ */
 function parseStoreLines(text) {
   const rows = [];
   const errors = [];
@@ -137,16 +149,24 @@ function parseStoreLines(text) {
     .map((l) => l.trim())
     .filter(Boolean);
   lines.forEach((line, idx) => {
-    const parts = line.split(/\t|,|，|\s{2,}|\s+/).filter(Boolean);
+    const structured = /[\t,，]/.test(line) ? line.split(/[\t,，]/).map((p) => p.trim()) : null;
+    const parts = structured || line.split(/\t|,|，|\s{2,}|\s+/).filter(Boolean);
     const code = (parts[0] || '').trim();
-    const name = parts.slice(1).join(' ').trim();
+    const name = structured
+      ? (parts[1] || '').trim()
+      : parts
+          .slice(1)
+          .join(' ')
+          .trim();
+    const alias = structured ? (parts[2] || '').trim() || null : null;
     if (!code || !name) {
       errors.push(`第 ${idx + 1} 行格式无法识别：${line}`);
       return;
     }
     if (code.length > 64) errors.push(`第 ${idx + 1} 行编码过长：${code}`);
     if (name.length > 120) errors.push(`第 ${idx + 1} 行名称过长：${name}`);
-    rows.push({ code, name });
+    if (alias && alias.length > 80) errors.push(`第 ${idx + 1} 行别名过长：${alias}`);
+    rows.push({ code, name, alias });
   });
   return { rows, errors };
 }
@@ -179,4 +199,5 @@ module.exports = {
   percent,
   chunkArray,
   parseStoreLines,
+  storeAlias,
 };

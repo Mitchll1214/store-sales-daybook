@@ -16,3 +16,8 @@ test/
 *.log
 .DS_Store
 Thumbs.db
+
+# 发布包 / 归档：其中可能含 data/app.db 与 .env，绝不能进入构建上下文
+*.zip
+*.tar.gz
+*.tgz

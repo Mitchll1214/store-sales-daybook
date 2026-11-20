@@ -226,8 +226,9 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
 
   const entries = db
     .prepare(
-      `SELECT e.store_id, e.biz_date, e.period, e.qty,
-              p.name AS productName, p.barcode, p.alias
+      `SELECT e.id AS entryId, e.store_id, e.biz_date, e.period, e.qty,
+              e.corrected_at, e.corrected_by_name,
+              p.name AS productName, p.barcode, p.alias, p.kind
        FROM sale_entries e JOIN products p ON p.id = e.product_id
        WHERE e.biz_date BETWEEN ? AND ?`,
     )
@@ -248,25 +249,37 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
           storeName: store.name,
           periods: {},
           totalQty: 0,
+          ownQty: 0,
         });
       }
       const bucket = perStore.get(sub.store_id);
+      // 本品合计按该时段明细汇总：提交记录只存了总件数，分不出本品 / 竞品
+      const periodEntries = entries.filter(
+        (e) => e.store_id === sub.store_id && e.biz_date === date && e.period === sub.period,
+      );
+      const periodOwnQty = periodEntries
+        .filter((e) => e.kind === 'own')
+        .reduce((sum, e) => sum + e.qty, 0);
       bucket.periods[sub.period] = {
         done: true,
         itemCount: sub.item_count,
         totalQty: sub.total_qty,
+        ownQty: periodOwnQty,
         submittedAt: sub.submitted_at,
         submitter: sub.submitter_name,
-        items: entries
-          .filter((e) => e.store_id === sub.store_id && e.biz_date === date && e.period === sub.period)
-          .map((e) => ({
-            productName: e.productName,
-            alias: e.alias,
-            barcode: e.barcode,
-            qty: e.qty,
-          })),
+        items: periodEntries.map((e) => ({
+          entryId: e.entryId,
+          productName: e.productName,
+          alias: e.alias,
+          barcode: e.barcode,
+          kind: e.kind === 'own' ? 'own' : 'comp',
+          qty: e.qty,
+          correctedAt: e.corrected_at || null,
+          correctedBy: e.corrected_by_name || '',
+        })),
       };
       bucket.totalQty += sub.total_qty;
+      bucket.ownQty += periodOwnQty;
     }
     const storeRows = [...perStore.values()].sort((a, b) => a.storeCode.localeCompare(b.storeCode));
     const expected = allowed.size * PERIODS.length;
@@ -277,6 +290,7 @@ function detailByDate(db, { storeIds, from, to, storeId, page = 1, pageSize = 7 
       done,
       rate: percent(done, expected),
       totalQty: storeRows.reduce((s, r) => s + r.totalQty, 0),
+      ownQty: storeRows.reduce((s, r) => s + r.ownQty, 0),
       stores: storeRows,
     };
   });
@@ -362,9 +376,10 @@ const KIND_ORDER = ['own', 'comp'];
  * - 每组都带 stores 明细，供前端点击展开门店维度。
  */
 function managerDay(db, { date, storeIds }) {
-  if (!isDateStr(date)) return { date, kindOrder: KIND_ORDER, categories: [], groups: [] };
+  const empty = { date, kindOrder: KIND_ORDER, categories: [], categoryTotals: [], products: [], groups: [] };
+  if (!isDateStr(date)) return empty;
   const stores = scopedStores(db, storeIds);
-  if (stores.length === 0) return { date, kindOrder: KIND_ORDER, categories: [], groups: [] };
+  if (stores.length === 0) return empty;
   const ids = stores.map((s) => s.id);
   const marks = ids.map(() => '?').join(',');
 
@@ -590,6 +605,23 @@ function managerDay(db, { date, storeIds }) {
     date,
     kindOrder: KIND_ORDER,
     categories: catOrder,
+    /**
+     * 当期品类汇总（概览顶部柱形图）：按门店并集去重后，把每个品类的本品 / 竞品销量相加。
+     * 与下方分组不同，这里同一门店被多个管理员管辖也只算一次，是「全部可见门店」的整体口径。
+     * 品类顺序与下方图一致（品类总量高的在前，「未分类」垫底），未提交的品类按 0 保留。
+     */
+    categoryTotals: catOrder.map((name) => {
+      let own = 0;
+      let comp = 0;
+      for (const pid of globalProductIds) {
+        const meta = productMeta.get(pid);
+        if (!meta || meta.category !== name) continue;
+        const qty = qtyAll.get(pid) || 0;
+        if (meta.kind === 'own') own += qty;
+        else comp += qty;
+      }
+      return { name, own, comp, total: own + comp };
+    }),
     // 全量商品顺序（含品类与属性），前端据此渲染统一的柱子列
     products: productOrder.map((pid) => {
       const meta = productMeta.get(pid);

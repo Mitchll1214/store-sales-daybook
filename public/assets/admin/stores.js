@@ -35,6 +35,10 @@
     const linkPill = store.autoLoginEnabled
       ? '<span class="pill pill-ok">免登录链接可用</span>'
       : '<span class="pill">免登录链接已关闭</span>';
+    // 别名是店员端唯一可见的门店标识，这里并列显示便于管理员核对「店员看到的是什么」
+    const aliasPill = store.alias
+      ? `<span class="pill pill-info" title="店员端显示这个别名">别名 ${escapeHtml(store.alias)}</span>`
+      : '<span class="pill pill-warn" title="未设置别名，店员端只显示「本门店」">未设别名</span>';
 
     return `<div class="store-card" data-store="${store.id}">
       <div class="sc-head">
@@ -42,7 +46,7 @@
           <h3>${escapeHtml(store.name)}</h3>
           <div class="sc-code">${escapeHtml(store.code)}</div>
         </div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">${statusPill}${linkPill}</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">${aliasPill}${statusPill}${linkPill}</div>
       </div>
 
       <div class="sc-info">${scope}</div>
@@ -79,7 +83,7 @@
     return `<div class="toolbar">
       <label class="search-box">
         <span class="search-ico" aria-hidden="true">${h.icon('search')}</span>
-        <input class="input search" id="f-q" type="search" placeholder="搜索门店编码 / 名称" value="${escapeHtml(
+        <input class="input search" id="f-q" type="search" placeholder="搜索门店编码 / 名称 / 别名" value="${escapeHtml(
           state.q,
         )}" autocomplete="off">
       </label>
@@ -103,8 +107,8 @@
       body: `<div class="field">
           <label>粘贴门店编码与名称</label>
           <textarea class="textarea" rows="9" id="batch-text"
-            placeholder="S001  城东旗舰店&#10;S002  城西分店&#10;&#10;每行一家，编码与名称用空格、逗号或制表符分隔"></textarea>
-          <div class="hint">门店编码唯一；免登录链接会在创建时自动生成并默认开启。</div>
+            placeholder="S001  城东旗舰店&#10;S002  城西分店&#10;S003,广州一店,羊城店&#10;&#10;每行一家，编码与名称用空格、逗号或制表符分隔；用逗号 / 制表符时可再加一段门店别名"></textarea>
+          <div class="hint">门店编码唯一；免登录链接会在创建时自动生成并默认开启。别名只在店员端显示，留空时店员端显示「本门店」。</div>
         </div>
 `,
       footer: `<button class="btn btn-ghost" type="button" data-act="cancel">取消</button>
@@ -156,6 +160,9 @@
           <input class="input" id="st-code" value="${escapeHtml(store ? store.code : '')}" placeholder="如 S001" autocomplete="off"></div>
         <div class="field"><label>门店名称</label>
           <input class="input" id="st-name" value="${escapeHtml(store ? store.name : '')}" placeholder="如 城东旗舰店" autocomplete="off"></div>
+        <div class="field"><label>门店别名（店员端可见）</label>
+          <input class="input" id="st-alias" value="${escapeHtml(store ? store.alias || '' : '')}" placeholder="如 城东店" autocomplete="off">
+          <div class="hint">店员端所有显示门店名称与编码的地方都会换成这个别名；留空时只显示「本门店」。后台与操作日志仍用真实编码与名称。</div></div>
         <div class="field"><label>状态</label>
           <select class="select" id="st-status">
             <option value="active" ${!store || store.status === 'active' ? 'selected' : ''}>启用</option>
@@ -171,6 +178,7 @@
       const payload = {
         code: $('#st-code', m.root).value.trim(),
         name: $('#st-name', m.root).value.trim(),
+        alias: $('#st-alias', m.root).value.trim(),
         status: $('#st-status', m.root).value,
         remark: $('#st-remark', m.root).value.trim(),
       };
@@ -270,7 +278,9 @@
           <div id="qr-host"><div class="skeleton" style="height:240px"></div></div>
           <div class="qr-meta">
             <div><b>${escapeHtml(store.code)} · ${escapeHtml(store.name)}</b></div>
-            <div>${escapeHtml(store.autoLoginUrl || '')}</div>
+            <div>店员端显示为：${escapeHtml(store.displayAlias || store.alias || '本门店')}</div>
+            <div class="mono" style="overflow-wrap:anywhere">${escapeHtml(store.autoLoginUrl || '')}</div>
+            <div class="tiny muted">链接只有随机 token，不含门店编码与名称</div>
             ${store.autoLoginEnabled ? '' : '<div style="color:var(--danger)">该门店免登录链接当前已关闭，扫码会提示不可用</div>'}
           </div>
         </div>`,

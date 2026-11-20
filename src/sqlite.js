@@ -36,8 +36,25 @@ function normalizeParams(params) {
 }
 
 class Database {
-  constructor(file) {
-    this.raw = new DatabaseSync(file);
+  /**
+   * @param {string} file 数据库文件路径
+   * @param {{readOnly?: boolean}} [options] readOnly 用于「只读自检」：
+   *   自检必须不参与写盘，否则半写状态的库可能被自检过程改坏。
+   */
+  constructor(file, options = {}) {
+    this.file = file;
+    this.readOnly = Boolean(options.readOnly);
+    this.raw = this.readOnly ? new DatabaseSync(file, { readOnly: true }) : new DatabaseSync(file);
+    if (this.readOnly) {
+      // readOnly 选项并非所有版本都生效（实测 Node 22.9 上仍允许写入），
+      // 而自检绝不能改坏半写状态的库。query_only 是 SQLite 自身的闸门，
+      // 作为兜底把写入彻底挡死；不受支持时忽略，不影响只读查询。
+      try {
+        this.raw.exec('PRAGMA query_only = ON');
+      } catch {
+        /* 版本不支持该 PRAGMA 时退化为仅依赖 readOnly */
+      }
+    }
     this.sqlCache = new Map();
     this.txDepth = 0;
   }
@@ -100,9 +117,54 @@ class Database {
     };
   }
 
+  /**
+   * 把 WAL 日志合并进主库。
+   *
+   * 进程被 docker stop / 强杀时，WAL 里可能还留着尚未落盘的事务；
+   * 正常关闭前主动 checkpoint 一次，能把「重启后自检判损坏」的概率压到最低。
+   * 失败不抛：checkpoint 只是收尾优化，绝不能拦住关闭流程。
+   */
+  checkpoint(mode = 'TRUNCATE') {
+    if (!this.raw) return false;
+    try {
+      this.raw.exec(`PRAGMA wal_checkpoint(${mode})`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 关闭当前连接并按同一文件路径重新打开。
+   *
+   * 恢复备份时必须在「文件替换」前后各断开一次：Windows 下库文件被连接占用时
+   * 无法替换。保持 Database 对象引用不变，路由 / audit / auth 持有的引用继续有效。
+   * 新连接打不开时会抛出原始错误，由调用方回滚文件后再调一次。
+   */
+  reopen() {
+    const previous = this.raw;
+    this.sqlCache.clear();
+    this.txDepth = 0;
+    this.raw = null;
+    // 必须真正关闭再打开：先关后开看似危险，但文件替换只能在这段空窗里做，
+    // 而调用方已提前生成安全副本，可以直接回滚。
+    if (previous) {
+      try {
+        previous.close();
+      } catch {
+        /* 旧连接可能已失效，关闭异常不影响后续打开 */
+      }
+    }
+    this.raw = new DatabaseSync(this.file);
+    return this;
+  }
+
   close() {
     this.sqlCache.clear();
-    this.raw.close();
+    const raw = this.raw;
+    this.raw = null;
+    if (!raw) return;
+    raw.close();
   }
 }
 

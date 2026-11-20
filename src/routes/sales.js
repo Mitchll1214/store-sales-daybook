@@ -18,6 +18,7 @@ const {
   localHour,
   periodState,
   nowStamp,
+  storeAlias,
 } = require('../util');
 const { productsForStore, submissionIndex, clerkHome } = require('../report');
 
@@ -31,11 +32,11 @@ function requireStoreContext(req) {
   return req.user.storeId;
 }
 
-/** 填报只收集数量：本系统不统计销售金额 */
+/** 填报只收集数量：本系统不统计销售金额。负数代表退货件数，允许提交 */
 function shapeEntryInput(raw) {
   const qty = Number(raw.qty ?? 0);
-  if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 0 || qty > MAX_QTY) {
-    throw new HttpError(400, '数量需为 0 以上的整数');
+  if (!Number.isFinite(qty) || !Number.isInteger(qty) || Math.abs(qty) > MAX_QTY) {
+    throw new HttpError(400, `数量需为整数，绝对值不超过 ${MAX_QTY}`);
   }
   return { qty };
 }
@@ -127,12 +128,20 @@ function createSalesRoutes({ db, audit }) {
   function storeContext(user) {
     const store = db
       .prepare(
-        `SELECT s.id, s.code, s.name, s.status
+        `SELECT s.id, s.code, s.name, s.alias, s.status
          FROM stores s WHERE s.id = ?`,
       )
       .get(user.storeId);
     if (!store) throw new HttpError(404, '门店不存在');
     return store;
+  }
+
+  /**
+   * 店员端可见的门店信息：只有别名。
+   * 真实编码与名称属于后台与日志口径，不回传给店员页面（含 /home、/session 的响应）。
+   */
+  function clerkStoreView(store) {
+    return { id: store.id, alias: storeAlias(store) };
   }
 
   /** 店员首页：今天与昨天的上午/下午完成情况 */
@@ -143,10 +152,11 @@ function createSalesRoutes({ db, audit }) {
       const store = storeContext(req.user);
       const home = clerkHome(db, storeId);
       res.json({
-        store: { code: store.code, name: store.name },
+        store: clerkStoreView(store),
         ...home,
         autoLogin: req.user.autoLogin,
-        hello: req.user.name,
+        // 免登录会话没有账号，操作人姓名是「真实店名（免登录）」；店员端只显示别名。
+        hello: req.user.autoLogin ? `${storeAlias(store)}（免登录）` : req.user.name,
       });
     }),
   );
@@ -169,7 +179,7 @@ function createSalesRoutes({ db, audit }) {
         ? { products: [], progress: { total: products.length, done: products.length }, nextProduct: null, readyToSubmit: false }
         : buildWizard(storeId, date, period);
       res.json({
-        store: { code: store.code, name: store.name },
+        store: clerkStoreView(store),
         date,
         period,
         periodLabel: PERIOD_LABEL[period],

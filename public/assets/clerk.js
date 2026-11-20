@@ -68,9 +68,11 @@
   function renderHome() {
     const data = state.home;
     const today = data.today;
-    $('#store-name').textContent = data.store.name;
-    $('#store-sub').textContent = data.store.code;
-    $('#hero-store').textContent = `${data.store.code} ${data.store.name}`;
+    // 门店信息只展示别名：真实编码与名称属于后台口径，店员端不展示
+    const alias = data.store.alias || '本门店';
+    $('#store-name').textContent = alias;
+    $('#store-sub').textContent = '每日上午 / 下午各提交一次';
+    $('#hero-store').textContent = alias;
     $('#hello').textContent = data.hello;
 
     const pending = data.slots[0].periods.filter((p) => !p.done).length;
@@ -171,7 +173,8 @@
         images: data.images || [],
       };
       state.values = new Map();
-      state.draftKey = `ssd_draft_${state.store.code}_${date}_${period}`;
+      // 草稿键用门店 id + 日期时段：门店编码已不在店员端下发
+      state.draftKey = `ssd_draft_${state.store.id}_${date}_${period}`;
       restoreDraft();
 
       viewHome.classList.add('hidden');
@@ -235,7 +238,7 @@
         <div class="wizard-head">
           <div style="min-width:0">
             <h2 style="font-size:15px">${escapeHtml(w.periodLabel)}填报 · ${escapeHtml(w.date)}</h2>
-            <p class="small muted" style="margin:3px 0 0">${escapeHtml(state.store.name)}</p>
+            <p class="small muted" style="margin:3px 0 0">${escapeHtml(state.store.alias || '本门店')}</p>
           </div>
           <span class="step-badge">${done} / ${total}</span>
         </div>
@@ -260,11 +263,13 @@
           <label class="tiny muted" for="qty-input">销售数量</label>
           <div class="qty-stepper">
             <button type="button" data-step="-1" aria-label="减少">−</button>
-            <input id="qty-input" type="number" inputmode="numeric" pattern="[0-9]*"
-                   min="0" step="1" value="${draft.qty === '' ? '' : Number(draft.qty)}"
+            <!-- 不设 min：退货需要减到 0 以下，负数表示退货件数 -->
+            <input id="qty-input" type="number" inputmode="numeric" step="1"
+                   value="${draft.qty === '' ? '' : Number(draft.qty)}"
                    placeholder="0" aria-label="销售数量">
             <button type="button" data-step="1" aria-label="增加">+</button>
           </div>
+          <p class="tiny muted" style="margin:2px 0 0">无销售填 0；有退货可点 − 减到负数</p>
         </div>
       </div>
 
@@ -314,11 +319,14 @@
       const qty = qtyInput.value === '' ? '' : Number(qtyInput.value);
       state.values.set(product.id, { qty });
       saveDraft();
-      const ready = qty !== '' && Number(qty) >= 0;
+      // 允许负数：有退货时数量为负，提交后参与合计
+      const ready = qty !== '' && Number.isInteger(Number(qty));
       $('#confirm-btn').disabled = !ready;
       tip.textContent = ready
-        ? '确认后自动进入下一个商品'
-        : '请填写销售数量（无销售请填 0）';
+        ? Number(qty) < 0
+          ? `已填 ${qty}，将记为退货`
+          : '确认后自动进入下一个商品'
+        : '请填写销售数量（无销售请填 0，退货可填负数）';
     };
 
     qtyInput.addEventListener('input', sync);
@@ -334,7 +342,8 @@
       btn.addEventListener('click', () => {
         const step = Number(btn.dataset.step);
         const cur = qtyInput.value === '' ? 0 : Number(qtyInput.value);
-        const next = Math.max(0, Math.floor(cur + step));
+        // 不设下限：退货要从 0 继续减到负数，减到负数即代表退货件数
+        const next = Math.trunc(cur + step);
         qtyInput.value = String(next);
         sync();
       });
@@ -413,7 +422,8 @@
     if (!w || !product || state.busy) return;
     const value = state.values.get(product.id) || {};
     const qty = value.qty === '' || value.qty == null ? null : Number(value.qty);
-    if (qty == null || !Number.isInteger(qty) || qty < 0) {
+    // 允许负数：有退货时数量为负，代表本时段退货件数
+    if (qty == null || !Number.isInteger(qty)) {
       toast('请填写正确的销售数量', 'err');
       return;
     }
@@ -546,7 +556,7 @@
       title: '更多操作',
       body: `<div style="display:grid;gap:10px">
         <button class="btn btn-ghost btn-block" data-act="refresh" type="button">刷新完成情况</button>
-        <button class="btn btn-ghost btn-block" data-act="copy" type="button">复制门店名称</button>
+        <button class="btn btn-ghost btn-block" data-act="copy" type="button">复制门店别名</button>
         <button class="btn btn-danger btn-block" data-act="logout" type="button">退出登录</button>
       </div>`,
     });
@@ -558,7 +568,8 @@
     });
     m.root.querySelector('[data-act="copy"]').addEventListener('click', async () => {
       close();
-      const text = state.store ? `门店 ${state.store.code} ${state.store.name}` : '';
+      // 只复制别名：店员端不接触真实门店编码与名称
+      const text = state.store ? `门店 ${state.store.alias || '本门店'}` : '';
       toast((await copyText(text)) ? '已复制' : '复制失败，请手动记录', text ? 'ok' : 'err');
     });
     m.root.querySelector('[data-act="logout"]').addEventListener('click', async () => {
